@@ -99,6 +99,14 @@ defmodule Bee.Api do
         |> repo().exists?()
       end
 
+      def exists(params) do
+        if exists?(params) do
+          {:ok, true}
+        else
+          {:error, false}
+        end
+      end
+
       def update(%Ecto.Changeset{} = model),
         do: model |> repo().update()
 
