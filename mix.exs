@@ -23,10 +23,10 @@ defmodule Bee.MixProject do
   defp deps do
     [
       {:ecto_sql, "~> 3.6"},
-      {:ecto_sqlite3, "~> 0.8.2"},
       {:jason, "~> 1.2"},
       {:value, github: "team-softaliza/value"},
       {:mix_test_watch, "~> 1.0", only: [:dev, :test], runtime: false}
+      {:ecto_sqlite3, "~> 0.8.2", only: [:test]},
     ]
   end
 end
