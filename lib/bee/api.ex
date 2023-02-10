@@ -352,7 +352,7 @@ defmodule Bee.Api do
     end
   end
 
-  def repo, do: Application.get_env(:be, :repo)
+  def repo, do: Application.get_env(:bee, :repo)
 
   def preload_json(model, include \\ []) do
     model
