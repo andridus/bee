@@ -26,7 +26,7 @@ defmodule Bee.Api do
       def get_by!(params \\ [where: [], order: [asc: :inserted_at]]) do
         params
         |> default_params()
-        |> __repo__().one()
+        |> repo().one()
       end
 
       def get(_id, _params \\ [where: [], order: [asc: :inserted_at]])
@@ -43,7 +43,7 @@ defmodule Bee.Api do
       def get!(id, params \\ [where: [], order: [asc: :inserted_at]]) do
         params
         |> default_params()
-        |> __repo__().get(id)
+        |> repo().get(id)
       end
 
       def blank(), do: struct(schema())
@@ -51,27 +51,56 @@ defmodule Bee.Api do
       def all(params \\ [where: [], order: []]) do
         params
         |> default_params()
-        |> __repo__().all()
+        |> repo().all()
       end
 
+      @doc """
+        insert_many
+
+        > insert only array of map (not a struct)
+
+        options: 
+        [
+          conflict_target: :column_name | {:unsafe_fragment, binary_fragment}
+          on_conflict: :atom | :tuple (one of :raise, :nothing, :replace_all, {:replace_all_except, fields}, {:replace, fields} )
+          batch: integer (with the number about insert records each step - for many rows)
+        ]
+      """
+      def insert_many(list, options \\ []) do
+        batch = options[:batch]
+        options = options |> Keyword.drop([:batch]) 
+        total = Enum.count(list)
+        if is_nil(batch) do
+          {num, _} = repo().insert_all(schema(), list, options)
+          {:ok, %{total: total, inserted: num, conflicts: total - num}}
+        else
+          num = 
+            list
+            |> Enum.chunk_every(batch)
+            |> Enum.map(& repo().insert_all(schema(), &1, options))
+            |> Enum.reduce(0, fn {num,_}, acc -> acc + num end)
+
+          {:ok, %{total: total, inserted: num, conflicts: total - num}}
+        end
+      end
       def insert(%Ecto.Changeset{} = model),
-        do: model |> __repo__().insert()
+        do: model |> repo().insert()
 
       def insert(params) do
         schema()
         |> struct()
         |> schema().changeset_insert(params)
-        |> __repo__().insert()
+        |> repo().insert()
       end
 
       def exists?(params) do
         params
         |> default_params()
-        |> __repo__().exists?()
+        |> repo().exists?()
       end
 
       def update(%Ecto.Changeset{} = model),
-        do: model |> __repo__().update()
+        do: model |> repo().update()
 
       def update(%{"id" => id} = model) do
         params = Map.drop(model, ["id"])
@@ -91,13 +120,47 @@ defmodule Bee.Api do
         id
         |> get!()
         |> schema().changeset_update(params)
-        |> __repo__().update()
+        |> repo().update()
       end
 
+      def prepare_to_delete(model, opts \\ []) do 
+        schema().changeset_delete(model)
+      rescue
+        _ -> 
+          if is_nil(opts[:error_silent]) do
+            raise "The function `changeset_delete` is not defined for `#{schema()}`."
+          else
+            model
+          end
+      end
+      def delete_many_by_id(ids, options \\ []) do
+        batch = options[:batch]
+        options = options |> Keyword.drop([:batch]) 
+        total = Enum.count(ids)
+        if is_nil(batch) do
+          {num, _} =
+            [where: [{{:in, :id}, ids}]] 
+            |> default_params()
+            |> repo().delete_all(options)
+          {:ok, %{total: total, deleted: num}}
+        else
+          num = 
+            ids
+            |> Enum.chunk_every(batch)
+            |> Enum.map(fn ids1 -> 
+              [where: [{{:in, :id}, ids1}]] 
+              |> default_params()
+              |> repo().delete_all(options)
+            end)
+            |> Enum.reduce(0, fn {num,_}, acc -> acc + num end)
+
+          {:ok, %{total: total, inserted: num}}
+        end
+      end
       def delete(id) when is_bitstring(id),
         do: id |> get!() |> delete()
 
-      def delete(model), do: model |> __repo__().delete()
+      def delete(model), do: model |> repo().delete()
 
       def default_params(params, sc \\ nil) do
         schm_ = sc || schema()
@@ -243,7 +306,7 @@ defmodule Bee.Api do
       def count(params \\ []) do
         params
         |> default_params()
-        |> __repo__().aggregate(:count, :id)
+        |> repo().aggregate(:count, :id)
       end
 
       @doc """
@@ -266,7 +329,6 @@ defmodule Bee.Api do
       def insert_or_update(%{id: id} = model) when not is_nil(id), do: update(model)
       def insert_or_update(model), do: insert(model)
 
-      def __repo__, do: Bee.Api.repo()
       defoverridable changeset: 2,
                      changeset: 3,
                      json_fields: 1,
@@ -282,7 +344,7 @@ defmodule Bee.Api do
     end
   end
 
-  def repo, do: Application.get_env(:be, :repo) || raise "Need to be defined in your config.exs 'config :be, repo: YouApp.Repo'"
+  def repo, do: Application.get_env(:be, :repo)
 
   def preload_json(model, include \\ []) do
     model
@@ -316,6 +378,9 @@ defmodule Bee.Api do
     ArgumentError -> String.to_atom(string)
   end
 
-  defp unwrap({:ok, value}), do: value
-  defp unwrap(err), do: err
+  def unwrap({:ok, value}), do: value
+  def unwrap(err), do: err
+  def unwrap!({_, value}), do: value
+
+  defoverridable repo: 0
 end

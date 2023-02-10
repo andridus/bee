@@ -40,8 +40,8 @@ defmodule Bee.Schema do
       Module.register_attribute(__MODULE__, :__unique_fields__, accumulate: true)
 
       import Ecto.Changeset
-      import Bee.Schema
-      @before_compile Bee.Schema
+      import Be.Schema
+      @before_compile Be.Schema
       @primary_key {:id, :binary_id, autogenerate: true}
       @foreign_key_type :binary_id
 
