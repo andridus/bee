@@ -2,8 +2,12 @@ defmodule Bee do
   @moduledoc """
   Documentation for `Bee`.
   """
-  def unique(len) do
-    gen_rnd(len, "abcdefghijklmnopqrstuvwxyz1234567890")
+  def unique(len, opts \\ []) do
+    is_only_numbers = opts[:only_numbers] || false
+    cond do
+      is_only_numbers  -> gen_rnd(len, "1234567890") |> String.to_integer()
+      :else -> gen_rnd(len, "abcdefghijklmnopqrstuvwxyz1234567890")
+    end
   end
 
   defp gen_rnd(to, al) do
