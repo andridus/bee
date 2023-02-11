@@ -2,18 +2,30 @@ defmodule Bee do
   @moduledoc """
   Documentation for `Bee`.
   """
+
+  @doc """
+    Return unique token from length.
+
+    # alphanumeric
+    iex> result = Bee.unique(10)
+    iex> String.length(result)
+    10
+
+    # only numbers
+    iex> result = Bee.unique(10, only_numbers: true)
+    iex> is_integer(result)
+    true
+  """
   def unique(len, opts \\ []) do
     is_only_numbers = opts[:only_numbers] || false
     cond do
-      is_only_numbers  -> gen_rnd(len, "1234567890") |> String.to_integer()
-      :else -> gen_rnd(len, "abcdefghijklmnopqrstuvwxyz1234567890")
+      is_only_numbers && len > 0 -> gen_rnd(1,  '123456789') <> gen_rnd(len-1,  '1234567890') |> String.to_integer()
+      len > 0 -> gen_rnd(len,  'abcdefghijklmnopqrstuvwxyz1234567890')
+      :else -> raise "not supported length '#{len}'"
     end
   end
 
-  defp gen_rnd(to, al) do
-    # DateTime.utc_now |> DateTime.to_unix(:millisecond)
-    len = String.length(al)
-    x = fn _x -> String.at(al, :rand.uniform(len)) end
-    1..to |> Enum.map_join(x)
-  end
+  defp gen_rnd(0, _symbols), do: nil
+  defp gen_rnd(1,  symbols), do: <<Enum.at(symbols, :rand.uniform(Enum.count(symbols)))>>
+  defp gen_rnd(to, symbols), do: for _ <- 1..to, into: "", do: <<Enum.at(symbols, :rand.uniform(Enum.count(symbols)))>>
 end
