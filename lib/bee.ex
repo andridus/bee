@@ -33,6 +33,6 @@ defmodule Bee do
   end
 
   defp gen_rnd(0, _symbols), do: nil
-  defp gen_rnd(1,  symbols), do: String.at(symbols, :rand.uniform(String.length(symbols)))
+  defp gen_rnd(1,  symbols), do: String.at(symbols, :rand.uniform(String.length(symbols) - 1))
   defp gen_rnd(to, symbols), do: Enum.map_join(1..to, fn _ -> String.at(symbols, :rand.uniform(String.length(symbols)) - 1) end)
 end
