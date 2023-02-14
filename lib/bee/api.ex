@@ -315,9 +315,16 @@ defmodule Bee.Api do
       end
 
       def count(params \\ []) do
+        aggregate(params ++ [opts: [aggregate: :count, field: :id]])
+      end
+
+      def aggregate(params \\ []) do
+        opts = params[:opts] || []
+        aggr = opts[:aggregate] || :count
+        field = opts[:field] || :id
         params
         |> default_params()
-        |> repo().aggregate(:count, :id)
+        |> repo().aggregate(aggr, field)
       end
 
       @doc """
