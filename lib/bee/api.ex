@@ -59,7 +59,7 @@ defmodule Bee.Api do
 
         > insert only array of map (not a struct)
 
-        options: 
+        options:
         [
           conflict_target: :column_name | {:unsafe_fragment, binary_fragment}
           on_conflict: :atom | :tuple (one of :raise, :nothing, :replace_all, {:replace_all_except, fields}, {:replace, fields} )
@@ -68,13 +68,13 @@ defmodule Bee.Api do
       """
       def insert_many(list, options \\ []) do
         batch = options[:batch]
-        options = options |> Keyword.drop([:batch]) 
+        options = options |> Keyword.drop([:batch])
         total = Enum.count(list)
         if is_nil(batch) do
           {num, _} = repo().insert_all(schema(), list, options)
           {:ok, %{total: total, inserted: num, conflicts: total - num}}
         else
-          num = 
+          num =
             list
             |> Enum.chunk_every(batch)
             |> Enum.map(& repo().insert_all(schema(), &1, options))
@@ -92,6 +92,9 @@ defmodule Bee.Api do
         |> schema().changeset_insert(params)
         |> repo().insert()
       end
+
+      def exists?(id) when is_bitstring(id),
+        do: exists?(where: [id: id])
 
       def exists?(params) do
         params
@@ -131,10 +134,10 @@ defmodule Bee.Api do
         |> repo().update()
       end
 
-      def prepare_to_delete(model, opts \\ []) do 
+      def prepare_to_delete(model, opts \\ []) do
         schema().changeset_delete(model)
       rescue
-        _ -> 
+        _ ->
           if is_nil(opts[:error_silent]) do
             raise "The function `changeset_delete` is not defined for `#{schema()}`."
           else
@@ -143,20 +146,20 @@ defmodule Bee.Api do
       end
       def delete_many_by_id(ids, options \\ []) do
         batch = options[:batch]
-        options = options |> Keyword.drop([:batch]) 
+        options = options |> Keyword.drop([:batch])
         total = Enum.count(ids)
         if is_nil(batch) do
           {num, _} =
-            [where: [{{:in, :id}, ids}]] 
+            [where: [{{:in, :id}, ids}]]
             |> default_params()
             |> repo().delete_all(options)
           {:ok, %{total: total, deleted: num}}
         else
-          num = 
+          num =
             ids
             |> Enum.chunk_every(batch)
-            |> Enum.map(fn ids1 -> 
-              [where: [{{:in, :id}, ids1}]] 
+            |> Enum.map(fn ids1 ->
+              [where: [{{:in, :id}, ids1}]]
               |> default_params()
               |> repo().delete_all(options)
             end)
