@@ -3,10 +3,14 @@ defmodule Bee.MixProject do
 
   def project do
     [
+      name: "bee",
+      source_url: "https://github.com/andridus/bee",
       app: :bee,
       version: "0.1.0",
       elixir: "~> 1.12",
       start_permanent: Mix.env() == :prod,
+      description: description(),
+      package: package(),
       deps: deps()
     ]
   end
@@ -19,14 +23,30 @@ defmodule Bee.MixProject do
     ]
   end
 
+  defp description() do
+    "Api tools for entity on Ecto"
+  end
+
+  defp package() do
+    [
+      # This option is only needed when you don't want to use the OTP application name
+      name: "bee",
+      # These are the default files included in the package
+      files: ~w(lib .formatter.exs mix.exs README.md),
+      licenses: ["Apache-2.0"],
+      links: %{"GitHub" => "https://github.com/andridus/bee"}
+    ]
+  end
+
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
       {:ecto_sql, "~> 3.6"},
       {:jason, "~> 1.2"},
-      {:value, github: "team-softaliza/value"},
+      {:value, "~> 0.1.0"},
       {:mix_test_watch, "~> 1.0", only: [:dev, :test], runtime: false},
       {:ecto_sqlite3, "~> 0.8.2", only: [:test]},
+      {:ex_doc, "~> 0.14", only: :dev, runtime: false}
     ]
   end
 end

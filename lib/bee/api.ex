@@ -70,6 +70,7 @@ defmodule Bee.Api do
         batch = options[:batch]
         options = options |> Keyword.drop([:batch])
         total = Enum.count(list)
+
         if is_nil(batch) do
           {num, _} = repo().insert_all(schema(), list, options)
           {:ok, %{total: total, inserted: num, conflicts: total - num}}
@@ -77,12 +78,13 @@ defmodule Bee.Api do
           num =
             list
             |> Enum.chunk_every(batch)
-            |> Enum.map(& repo().insert_all(schema(), &1, options))
-            |> Enum.reduce(0, fn {num,_}, acc -> acc + num end)
+            |> Enum.map(&repo().insert_all(schema(), &1, options))
+            |> Enum.reduce(0, fn {num, _}, acc -> acc + num end)
 
           {:ok, %{total: total, inserted: num, conflicts: total - num}}
         end
       end
+
       def insert(%Ecto.Changeset{} = model),
         do: model |> repo().insert()
 
@@ -144,15 +146,18 @@ defmodule Bee.Api do
             model
           end
       end
+
       def delete_many_by_id(ids, options \\ []) do
         batch = options[:batch]
         options = options |> Keyword.drop([:batch])
         total = Enum.count(ids)
+
         if is_nil(batch) do
           {num, _} =
             [where: [{{:in, :id}, ids}]]
             |> default_params()
             |> repo().delete_all(options)
+
           {:ok, %{total: total, deleted: num}}
         else
           num =
@@ -163,11 +168,12 @@ defmodule Bee.Api do
               |> default_params()
               |> repo().delete_all(options)
             end)
-            |> Enum.reduce(0, fn {num,_}, acc -> acc + num end)
+            |> Enum.reduce(0, fn {num, _}, acc -> acc + num end)
 
           {:ok, %{total: total, inserted: num}}
         end
       end
+
       def delete(id) when is_bitstring(id),
         do: id |> get!() |> delete()
 
@@ -322,6 +328,7 @@ defmodule Bee.Api do
         opts = params[:opts] || []
         aggr = opts[:aggregate] || :count
         field = opts[:field] || :id
+
         params
         |> default_params()
         |> repo().aggregate(aggr, field)

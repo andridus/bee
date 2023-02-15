@@ -205,7 +205,6 @@ defmodule Bee.Schema do
           |> Jason.Encode.keyword(opts)
         end
       end
-
     end
   end
 
