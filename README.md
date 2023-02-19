@@ -8,8 +8,10 @@ For example, you could specify a `User` entity as follows:
 
 ```elixir
   defmodule User do
+
     use Ecto.Schema
     use Bee.Schema
+
     generate_bee do
       schema "users" do
         field :name, :string
@@ -18,10 +20,12 @@ For example, you could specify a `User` entity as follows:
         timestamps()
       end
     end
+
     defmodule User.Api do
       @schema User
       use Bee.Api
     end
+    
   end
   User.Api.all(where: [permission: :basic])
 ```
