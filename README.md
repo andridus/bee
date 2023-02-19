@@ -43,3 +43,7 @@ def deps do
   ]
 end
 ```
+
+## To Do
+  - [x] Bee
+  - [ ] Worker Bee
