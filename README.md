@@ -4,18 +4,36 @@
 
 ## Installation
 
-If [available in Hex](https://hex.pm/docs/publish), the package can be installed
-by adding `bee` to your list of dependencies in `mix.exs`:
+The package can be installed by adding `bee` to your list of dependencies in `mix.exs`:
 
 ```elixir
 def deps do
   [
-    {:bee, "~> 0.1.0"}
+    {:bee, "~> 0.2.0"}
   ]
 end
 ```
 
-Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
-and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
-be found at <https://hexdocs.pm/bee>.
+Documentation for [Bee](https://hexdocs.pm/bee/Bee.html).
+Bee generate an Api for given Ecto Schema.
+For example, you could specify a `User` entity as follows:
 
+```elixir
+  defmodule User do
+    use Ecto.Schema
+    use Bee.Schema
+    generate_bee do
+      schema "users" do
+        field :name, :string
+        field :password, :string
+        field :permission, Ecto.Enum, values: [:basic, :manager, :admin], default: :basic
+        timestamps()
+      end
+    end
+    defmodule User.Api do
+      @schema User
+      use Bee.Api
+    end
+  end
+  User.Api.all(where: [permission: :basic])
+```
