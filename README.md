@@ -1,7 +1,9 @@
 # Bee
 
 Documentation for [Bee](https://hexdocs.pm/bee/Bee.html).
+
 Bee generate an Api for given Ecto Schema.
+
 For example, you could specify a `User` entity as follows:
 
 ```elixir
