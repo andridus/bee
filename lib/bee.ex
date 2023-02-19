@@ -44,7 +44,7 @@ defmodule Bee do
        4796925652  = Bee.unique(10, only_numbers: true)
   """
   @type option :: {:only_numbers, boolean()} | {:with_zeros, boolean()}
-  @spec unique(len :: integer(), opts :: [option]) :: String.t | integer()
+  @spec unique(len :: integer(), opts :: [option]) :: String.t() | integer()
   def unique(len, opts \\ []) do
     is_only_numbers = opts[:only_numbers] || false
     with_zeros = opts[:with_zeros] || false

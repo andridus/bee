@@ -84,7 +84,6 @@ defmodule Bee.Api do
         |> repo().insert()
       end
 
-
       def update(%Ecto.Changeset{} = model),
         do: model |> repo().update()
 
@@ -98,8 +97,12 @@ defmodule Bee.Api do
         __update_model__(id, params)
       end
 
-      def update(id, params) when is_bitstring(id) or is_integer(id), do: __update_model__(id, params)
-      def update(%{id: id}, params) when is_bitstring(id) or is_integer(id), do: __update_model__(id, params)
+      def update(id, params) when is_bitstring(id) or is_integer(id),
+        do: __update_model__(id, params)
+
+      def update(%{id: id}, params) when is_bitstring(id) or is_integer(id),
+        do: __update_model__(id, params)
+
       def update(_invalid_model, _params), do: {:error, :invalid_model}
 
       defp __update_model__(id, params) do
@@ -321,18 +324,6 @@ defmodule Bee.Api do
         |> repo().aggregate(mode, field)
       end
 
-      @doc """
-        get json data
-      """
-      def json(_model, _include \\ [])
-      def json(nil, _), do: nil
-
-      def json(model, include) do
-        model
-        |> preload_json(include)
-        |> Map.take(json_fields(include))
-      end
-
       def insert_or_update(%Ecto.Changeset{action: :insert} = model), do: insert(model)
 
       def insert_or_update(%Ecto.Changeset{action: :update, data: %{id: _id}} = model),
@@ -340,24 +331,6 @@ defmodule Bee.Api do
 
       def insert_or_update(%{id: id} = model) when not is_nil(id), do: update(model)
       def insert_or_update(model), do: insert(model)
-
-      def preload_json(model, include \\ []) do
-          model
-          |> repo().preload(include)
-          |> Map.take(include)
-          |> Map.to_list()
-          |> Enum.map(fn {key, value} ->
-            module = get_module(model, key, include)
-
-            if is_list(value) do
-              {key, Enum.map(value, &(apply(module, :json, [&1]) |> unwrap()))}
-            else
-              {key, apply(module, :json, [value]) |> unwrap()}
-            end
-          end)
-          |> Map.new()
-          |> (&Map.merge(model, &1)).()
-        end
 
       def repo, do: unquote(args)[:repo] || Application.get_env(:bee, :repo)
 
@@ -376,16 +349,17 @@ defmodule Bee.Api do
     end
   end
 
-  @type option :: {:where, keyword()}
-                | {:or_where,  keyword()}
-                | {:preload, list(atom()) | keyword()}
-                | {:order,  list(atom())  | keyword()}
-                | {:select,  list(atom()) | list(String.t())}
-                | {:group,  list(atom()) }
-                | {:distinct,  list(atom())}
-                | {:debug,  boolean()}
-                | {:limit,  integer()}
-                | {:offset,  integer()}
+  @type option ::
+          {:where, keyword()}
+          | {:or_where, keyword()}
+          | {:preload, list(atom()) | keyword()}
+          | {:order, list(atom()) | keyword()}
+          | {:select, list(atom()) | list(String.t())}
+          | {:group, list(atom())}
+          | {:distinct, list(atom())}
+          | {:debug, boolean()}
+          | {:limit, integer()}
+          | {:offset, integer()}
   @type id :: binary()
   @type options :: [option]
 
@@ -534,7 +508,8 @@ defmodule Bee.Api do
   """
   @doc group: "Query API"
   @callback insert(params :: map()) :: {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()}
-  @callback insert(struct :: Ecto.Changeset.t()) :: {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()}
+  @callback insert(struct :: Ecto.Changeset.t()) ::
+              {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()}
 
   @doc """
   Inserts many of an entity on data store by struct defined `Ecto.Schema`,
@@ -561,7 +536,9 @@ defmodule Bee.Api do
       )
   """
   @doc group: "Query API"
-  @callback insert_many(data :: list(map()), opts :: keyword()) :: {:ok, %{total: integer(), inserted: integer(), conflicts: integer()}} | {:error, term()}
+  @callback insert_many(data :: list(map()), opts :: keyword()) ::
+              {:ok, %{total: integer(), inserted: integer(), conflicts: integer()}}
+              | {:error, term()}
 
   @doc """
   Updates an entity using its primary key on `id` in a given map or struct, or a given changeset.
@@ -577,8 +554,10 @@ defmodule Bee.Api do
   """
   @doc group: "Query API"
   @callback update(params :: map()) :: {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()}
-  @callback update(struct :: Ecto.Schema.t() | Ecto.Changeset.t()) :: {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()}
-  @callback update(struct :: Ecto.Schema.t(), params :: map()) :: {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()}
+  @callback update(struct :: Ecto.Schema.t() | Ecto.Changeset.t()) ::
+              {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()}
+  @callback update(struct :: Ecto.Schema.t(), params :: map()) ::
+              {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()}
 
   @doc """
   Delete many of an entity on data store by list of id (primary key).
@@ -592,7 +571,7 @@ defmodule Bee.Api do
   """
   @doc group: "Query API"
   @callback delete_many_by_id(ids :: list(binary()) | list(integer()), opts :: keyword()) ::
-    {:ok, %{total: integer(), deleted: integer()}} | {:error, term()}
+              {:ok, %{total: integer(), deleted: integer()}} | {:error, term()}
 
   @doc """
   Delete an entity using its primary key on `id` in a given entity or entity or changeset.
@@ -603,9 +582,12 @@ defmodule Bee.Api do
       Post.Api.delete(%Ecto.Changeset{})
   """
   @doc group: "Query API"
-  @callback delete(id :: String.t() | integer()) :: {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()} | {:error, :not_found}
-  @callback delete(model :: Ecto.Schema.t()) :: {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()} | {:error, :not_found}
-  @callback delete(changeset :: Ecto.Changeset.t()) :: {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()} | {:error, :not_found}
+  @callback delete(id :: String.t() | integer()) ::
+              {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()} | {:error, :not_found}
+  @callback delete(model :: Ecto.Schema.t()) ::
+              {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()} | {:error, :not_found}
+  @callback delete(changeset :: Ecto.Changeset.t()) ::
+              {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()} | {:error, :not_found}
 
   @doc """
   Check if exists an entity, return the boolean true or false .
@@ -687,23 +669,6 @@ defmodule Bee.Api do
       Post.Api.aggregate(:count, :id, where: [title: "My Post"])
   """
   @doc group: "Query API"
-  @callback aggregate(mode :: :avg | :count | :max | :min | :sum, field :: atom(), options) :: integer()
-
-  def get_module(model, key, _includes) do
-    Ecto.build_assoc(model, key, %{})
-    |> Map.get(:__struct__)
-    |> to_string()
-    |> String.replace("Schema", "Api")
-    |> atomize()
-  end
-
-  def atomize(string) when is_bitstring(string) do
-    string |> String.to_existing_atom()
-  rescue
-    ArgumentError -> String.to_atom(string)
-  end
-
-  def unwrap({:ok, value}), do: value
-  def unwrap(err), do: err
-  def unwrap!({_, value}), do: value
+  @callback aggregate(mode :: :avg | :count | :max | :min | :sum, field :: atom(), options) ::
+              integer()
 end
