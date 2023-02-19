@@ -1,26 +1,50 @@
 defmodule Bee do
   @moduledoc """
   Documentation for `Bee`.
+
+  Bee generate an Api for given Ecto Schema.
+
+  For example, you could specify a `User` entity as follows:
+
+    ```elixir
+
+      defmodule User do
+        use Ecto.Schema
+        use Bee.Schema
+
+        generate_bee do
+          schema "users" do
+            field :name, :string
+            field :password, :string
+            field :permission, Ecto.Enum, values: [:basic, :manager, :admin], default: :basic
+            timestamps()
+          end
+        end
+
+        defmodule User.Api do
+          @schema User
+          use Bee.Api
+        end
+      end
+
+      User.Api.all(where: [permission: :basic])
+    ```
   """
 
   @doc """
-    Return unique token from length.
+  Return unique token from length.
 
-    # alphanumeric
-    iex> result = Bee.unique(10)
-    iex> String.length(result)
-    10
+  ### Options
+    * `:only_numbers` - boolean, forces to return only numbers (integer)
+    * `:with_zeros` - boolean, forces to return only numbers, but zero in first position is possible, return string
 
-     # only numbers with zeros
-    iex> result = Bee.unique(10, only_numbers: true, with_zeros: true)
-    iex> String.length(result)
-    10
-
-    # only numbers
-    iex> result = Bee.unique(10, only_numbers: true)
-    iex> is_integer(result)
-    true
+  ## Example
+      "ai0ruwr9pc" = Bee.unique(10)
+      "0647250296" = Bee.unique(10, only_numbers: true, with_zeros: true)
+       4796925652  = Bee.unique(10, only_numbers: true)
   """
+  @type option :: {:only_numbers, boolean()} | {:with_zeros, boolean()}
+  @spec unique(len :: integer(), opts :: [option]) :: String.t | integer()
   def unique(len, opts \\ []) do
     is_only_numbers = opts[:only_numbers] || false
     with_zeros = opts[:with_zeros] || false

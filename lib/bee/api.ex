@@ -1,18 +1,21 @@
 defmodule Bee.Api do
-  @moduledoc false
-  defmacro __using__(_) do
+  @moduledoc """
+    Generate an Api for  repository.
+  """
+  defmacro __using__(args) do
     quote do
       import Ecto.Query
       import Bee.Api
 
       def schema, do: @schema
+      def blank(), do: struct(schema())
 
-      def changeset(changeset, params, type \\ "create") do
+      def changeset(changeset, params, type \\ "insert") do
         apply(schema(), :"changeset_#{type}", [changeset, params])
       end
 
       def json_fields(append) do
-        schema().__json__() ++ append
+        schema().bee_fields() ++ append
       end
 
       def get_by(params \\ [where: [], order: [asc: :inserted_at]]) do
@@ -46,26 +49,12 @@ defmodule Bee.Api do
         |> repo().get(id)
       end
 
-      def blank(), do: struct(schema())
-
       def all(params \\ [where: [], order: []]) do
         params
         |> default_params()
         |> repo().all()
       end
 
-      @doc """
-        insert_many
-
-        > insert only array of map (not a struct)
-
-        options:
-        [
-          conflict_target: :column_name | {:unsafe_fragment, binary_fragment}
-          on_conflict: :atom | :tuple (one of :raise, :nothing, :replace_all, {:replace_all_except, fields}, {:replace, fields} )
-          batch: integer (with the number about insert records each step - for many rows)
-        ]
-      """
       def insert_many(list, options \\ []) do
         batch = options[:batch]
         options = options |> Keyword.drop([:batch])
@@ -95,22 +84,6 @@ defmodule Bee.Api do
         |> repo().insert()
       end
 
-      def exists?(id) when is_bitstring(id),
-        do: exists?(where: [id: id])
-
-      def exists?(params) do
-        params
-        |> default_params()
-        |> repo().exists?()
-      end
-
-      def exists(params) do
-        if exists?(params) do
-          {:ok, true}
-        else
-          {:error, false}
-        end
-      end
 
       def update(%Ecto.Changeset{} = model),
         do: model |> repo().update()
@@ -125,8 +98,8 @@ defmodule Bee.Api do
         __update_model__(id, params)
       end
 
-      def update(id, params) when is_bitstring(id), do: __update_model__(id, params)
-      def update(%{id: id}, params) when is_bitstring(id), do: __update_model__(id, params)
+      def update(id, params) when is_bitstring(id) or is_integer(id), do: __update_model__(id, params)
+      def update(%{id: id}, params) when is_bitstring(id) or is_integer(id), do: __update_model__(id, params)
       def update(_invalid_model, _params), do: {:error, :invalid_model}
 
       defp __update_model__(id, params) do
@@ -174,10 +147,11 @@ defmodule Bee.Api do
         end
       end
 
-      def delete(id) when is_bitstring(id),
+      def delete(id) when is_bitstring(id) or is_integer(id),
         do: id |> get!() |> delete()
 
       def delete(model), do: model |> repo().delete()
+      def delete(%Ecto.Changeset{} = changeset), do: changeset |> repo().delete()
 
       def default_params(params, sc \\ nil) do
         schm_ = sc || schema()
@@ -198,7 +172,7 @@ defmodule Bee.Api do
             lst =
               Enum.reduce(params, [], fn
                 {k, v}, acc ->
-                  {_k, _t, opts} = schm_.__live_fields__() |> List.keyfind!(k, 0)
+                  {_k, opts} = schm_.bee_raw_fields() |> List.keyfind!(k, 0)
                   [{k, default_params(v, opts[:schema])} | acc]
 
                 k, acc when is_atom(k) ->
@@ -320,18 +294,31 @@ defmodule Bee.Api do
         |> Kernel.||([])
       end
 
-      def count(params \\ []) do
-        aggregate(params ++ [opts: [aggregate: :count, field: :id]])
-      end
+      def exists?(id) when is_bitstring(id),
+        do: exists?(where: [id: id])
 
-      def aggregate(params \\ []) do
-        opts = params[:opts] || []
-        aggr = opts[:aggregate] || :count
-        field = opts[:field] || :id
-
+      def exists?(params) do
         params
         |> default_params()
-        |> repo().aggregate(aggr, field)
+        |> repo().exists?()
+      end
+
+      def exists(params) do
+        if exists?(params) do
+          {:ok, true}
+        else
+          {:error, false}
+        end
+      end
+
+      def count(params \\ []) do
+        aggregate(:count, :id, params)
+      end
+
+      def aggregate(mode, field, params \\ []) do
+        params
+        |> default_params()
+        |> repo().aggregate(mode, field)
       end
 
       @doc """
@@ -354,6 +341,26 @@ defmodule Bee.Api do
       def insert_or_update(%{id: id} = model) when not is_nil(id), do: update(model)
       def insert_or_update(model), do: insert(model)
 
+      def preload_json(model, include \\ []) do
+          model
+          |> repo().preload(include)
+          |> Map.take(include)
+          |> Map.to_list()
+          |> Enum.map(fn {key, value} ->
+            module = get_module(model, key, include)
+
+            if is_list(value) do
+              {key, Enum.map(value, &(apply(module, :json, [&1]) |> unwrap()))}
+            else
+              {key, apply(module, :json, [value]) |> unwrap()}
+            end
+          end)
+          |> Map.new()
+          |> (&Map.merge(model, &1)).()
+        end
+
+      def repo, do: unquote(args)[:repo] || Application.get_env(:bee, :repo)
+
       defoverridable changeset: 2,
                      changeset: 3,
                      json_fields: 1,
@@ -369,25 +376,318 @@ defmodule Bee.Api do
     end
   end
 
-  def repo, do: Application.get_env(:bee, :repo)
+  @type option :: {:where, keyword()}
+                | {:or_where,  keyword()}
+                | {:preload, list(atom()) | keyword()}
+                | {:order,  list(atom())  | keyword()}
+                | {:select,  list(atom()) | list(String.t())}
+                | {:group,  list(atom()) }
+                | {:distinct,  list(atom())}
+                | {:debug,  boolean()}
+                | {:limit,  integer()}
+                | {:offset,  integer()}
+  @type id :: binary()
+  @type options :: [option]
 
-  def preload_json(model, include \\ []) do
-    model
-    |> repo().preload(include)
-    |> Map.take(include)
-    |> Map.to_list()
-    |> Enum.map(fn {key, value} ->
-      module = get_module(model, key, include)
+  @doc """
+  Obtain a single model from the data store where the primary key matches the
+  given id.
+  Returns `{:error, :not_found}` if no result was found. If the struct in the queryable
+  has no or more than one primary key, it will raise an argument error.
 
-      if is_list(value) do
-        {key, Enum.map(value, &(apply(module, :json, [&1]) |> unwrap()))}
-      else
-        {key, apply(module, :json, [value]) |> unwrap()}
-      end
-    end)
-    |> Map.new()
-    |> then(&Map.merge(model, &1))
-  end
+  ### Options
+    * `:preload` - Preload relations on query
+    * `:order` - Set order for the query
+    * `:select` - Fields should be returned by query
+    * `:group` - Grouping query by fields
+    * `:distinct` - List of columns (atoms) that remove duplicate on query
+    * `:debug` - Show in console, the generated Ecto query before call
+    * `:limit` - Set the limit for the query
+    * `:offset` - Set the offset for the query
+
+  See the ["Knowing Options"](#module-options) section at the module
+  documentation for more details.
+  ## Example
+      Post.Api.get(42)
+      Post.Api.get(42, preload: [:comments])
+      Post.Api.get(42, preload: [comments: [preload: [:users]]])
+  """
+  @doc group: "Query API"
+  @callback get(id, options) :: {:ok, Ecto.Schema.t()} | {:ok, term} | {:error, :not_found}
+
+  @doc """
+  Similar to `get/2` but raises `Ecto.NoResultsError` if no record was found.
+
+  ### Options
+    * `:preload` - Preload relations on query
+    * `:order` - Set order for the query
+    * `:select` - Fields should be returned by query
+    * `:group` - Grouping query by fields
+    * `:distinct` - List of columns (atoms) that remove duplicate on query
+    * `:debug` - Show in console, the generated Ecto query before call
+    * `:limit` - Set the limit for the query
+    * `:offset` - Set the offset for the query
+
+  See the ["Knowing Options"](#module-options) section at the module
+  documentation for more details.
+  ## Example
+      Post.Api.get!(42)
+      Post.Api.get!(42, preload: [:comments])
+      Post.Api.get!(42, preload: [comments: [preload: [:users]]])
+  """
+  @doc group: "Query API"
+  @callback get!(id, options) :: {:ok, Ecto.Schema.t()} | {:ok, term} | {:error, :not_found}
+
+  @doc """
+  Obtain a single model from the data store where the conditions on `where` or `or_where` matches.
+  Returns `{:error, :not_found}` if no result was found. If the struct in the queryable
+  has no or more than one primary key, it will raise an argument error.
+
+  ### Options
+    * `:where` - The group conditions for WHERE argument in SQL that results in AND for any keys.
+    * `:or_where` - Using after `:where`, grouping conditions in a OR for WHERE argument in SQL.
+    * `:preload` - Preload relations on query
+    * `:order` - Set order for the query
+    * `:select` - Fields should be returned by query
+    * `:group` - Grouping query by fields
+    * `:distinct` - List of columns (atoms) that remove duplicate on query
+    * `:debug` - Show in console, the generated Ecto query before call
+    * `:limit` - Set the limit for the query
+    * `:offset` - Set the offset for the query
+
+  See the ["Knowing Options"](#module-options) section at the module
+  documentation for more details.
+  ## Example
+      Post.Api.get_by(where: [title: "My Post"])
+      Post.Api.get_by(where: [title: "My Post"], preload: [:comments])
+      Post.Api.get_by(where: [title: "My Post"], preload: [comments: [preload: [:users]]])
+  """
+  @doc group: "Query API"
+  @callback get_by(options) :: {:ok, Ecto.Schema.t()} | {:ok, term} | {:error, :not_found}
+
+  @doc """
+  Similar to `get_by/2` but raises `Ecto.NoResultsError` if no record was found.
+
+  ### Options
+    * `:where` - The group conditions for WHERE argument in SQL that results in AND for any keys.
+    * `:or_where` - Using after `:where`, grouping conditions in a OR for WHERE argument in SQL.
+    * `:preload` - Preload relations on query
+    * `:order` - Set order for the query
+    * `:select` - Fields should be returned by query
+    * `:group` - Grouping query by fields
+    * `:distinct` - List of columns (atoms) that remove duplicate on query
+    * `:debug` - Show in console, the generated Ecto query before call
+    * `:limit` - Set the limit for the query
+    * `:offset` - Set the offset for the query
+
+  See the ["Knowing Options"](#module-options) section at the module
+  documentation for more details.
+  ## Example
+      Post.Api.get_by!(where: [title: "My Post"], or_where: [title: "My Post 2"])
+      Post.Api.get_by!(where: [title: "My Post"], preload: [:comments])
+      Post.Api.get_by!(where: [title: "My Post"], preload: [comments: [preload: [:users]]])
+  """
+  @doc group: "Query API"
+  @callback get_by!(options) :: {:ok, Ecto.Schema.t()} | {:ok, term} | {:error, :not_found}
+
+  @doc """
+  Obtain all models from the data store where the conditions on `where` or `or_where` matches.
+  Returns `[]` (empty list) if no result was found.
+
+  ### Options
+    * `:where` - The group conditions for WHERE argument in SQL that results in AND for any keys.
+    * `:or_where` - Using after `:where`, grouping conditions in a OR for WHERE argument in SQL.
+    * `:preload` - Preload relations on query
+    * `:order` - Set order for the query
+    * `:select` - Fields should be returned by query
+    * `:group` - Grouping query by fields
+    * `:distinct` - List of columns (atoms) that remove duplicate on query
+    * `:debug` - Show in console, the generated Ecto query before call
+    * `:limit` - Set the limit for the query
+    * `:offset` - Set the offset for the query
+
+  See the ["Knowing Options"](#module-options) section at the module
+  documentation for more details.
+  ## Example
+      Post.Api.all(where: [area: "Financial"])
+      Post.Api.all(where: [area: "Financial"], preload: [:comments])
+      Post.Api.all(where: [area: "Financial"], preload: [comments: [preload: [:users]]])
+  """
+  @doc group: "Query API"
+  @callback all(options) :: list(Ecto.Schema.t()) | list(term) | []
+
+  @doc """
+  Inserts an entity on data store by struct defined `Ecto.Schema`,
+  or map of data, or a changeset.
+
+  In case a struct or map is given, the struct or map is converted
+  into a changeset with all non-nil fields as part of the changeset.
+
+  In case a changeset is given, the changes in the changeset are merged
+  with the struct fields, and all of them are sent to the
+  database.
+
+  ## Example
+      Post.Api.insert(%Post{title: "My Post})
+      Post.Api.insert(%{title: "My Post})
+      Post.Api.insert(%Ecto.Changeset{changes: %{title: "My Post}})
+  """
+  @doc group: "Query API"
+  @callback insert(params :: map()) :: {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()}
+  @callback insert(struct :: Ecto.Changeset.t()) :: {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()}
+
+  @doc """
+  Inserts many of an entity on data store by struct defined `Ecto.Schema`,
+  or map of data, or a changeset.
+
+  ### Options
+    * `:conflict_target` - :column_name | {:unsafe_fragment, binary_fragment}
+    * `:on_conflict` - one of :raise, :nothing, :replace_all, {:replace_all_except, fields}, {:replace, fields}
+    * `:batch` - quantity integer of items by batch.
+
+
+  ## Example
+      Post.Api.insert_many(
+        [
+        %{id: 1, title: "My Post"},
+        %{id: 2, title: "My Post 2"},
+        ...
+        ],
+        [
+          on_conflict: {:replace_all_except, [:id]},
+          conflict_target: [:id],
+          batch: 10
+        ]
+      )
+  """
+  @doc group: "Query API"
+  @callback insert_many(data :: list(map()), opts :: keyword()) :: {:ok, %{total: integer(), inserted: integer(), conflicts: integer()}} | {:error, term()}
+
+  @doc """
+  Updates an entity using its primary key on `id` in a given map or struct, or a given changeset.
+
+  *** Only valid when `id` is a primary key***
+
+  ## Example
+      post = %Post{id: 1, title: "My Post}
+
+      Post.Api.update(post, %{title: "My Post2})
+      Post.Api.update(%{id: 1 title: "My Post2})
+      Post.Api.update(%Ecto.Changeset{})
+  """
+  @doc group: "Query API"
+  @callback update(params :: map()) :: {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()}
+  @callback update(struct :: Ecto.Schema.t() | Ecto.Changeset.t()) :: {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()}
+  @callback update(struct :: Ecto.Schema.t(), params :: map()) :: {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()}
+
+  @doc """
+  Delete many of an entity on data store by list of id (primary key).
+
+  ### Options
+    * `:batch` - quantity integer of items by batch.
+
+
+  ## Example
+      Post.Api.delete_many_by_id([1,2,3,4,5], [ batch: 10 ])
+  """
+  @doc group: "Query API"
+  @callback delete_many_by_id(ids :: list(binary()) | list(integer()), opts :: keyword()) ::
+    {:ok, %{total: integer(), deleted: integer()}} | {:error, term()}
+
+  @doc """
+  Delete an entity using its primary key on `id` in a given entity or entity or changeset.
+
+  ## Example
+      Post.Api.delete(1)
+      Post.Api.delete(%Post{id: 1})
+      Post.Api.delete(%Ecto.Changeset{})
+  """
+  @doc group: "Query API"
+  @callback delete(id :: String.t() | integer()) :: {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()} | {:error, :not_found}
+  @callback delete(model :: Ecto.Schema.t()) :: {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()} | {:error, :not_found}
+  @callback delete(changeset :: Ecto.Changeset.t()) :: {:ok, Ecto.Schema.t()} | {:error, Ecto.Changeset.t()} | {:error, :not_found}
+
+  @doc """
+  Check if exists an entity, return the boolean true or false .
+
+  ### Options
+    * `:where` - The group conditions for WHERE argument in SQL that results in AND for any keys.
+    * `:or_where` - Using after `:where`, grouping conditions in a OR for WHERE argument in SQL.
+    * `:group` - Grouping query by fields
+    * `:distinct` - List of columns (atoms) that remove duplicate on query
+    * `:debug` - Show in console, the generated Ecto query before call
+    * `:limit` - Set the limit for the query
+    * `:offset` - Set the offset for the query
+
+  ## Example
+      Post.Api.exists?(where: [title: "My Post"])
+  """
+  @doc group: "Query API"
+  @callback exists?(options) :: true | false
+
+  @doc """
+  Check if exists an entity. Return the tuple {:ok, true} | {:error, false}
+
+  ### Options
+    * `:where` - The group conditions for WHERE argument in SQL that results in AND for any keys.
+    * `:or_where` - Using after `:where`, grouping conditions in a OR for WHERE argument in SQL.
+    * `:group` - Grouping query by fields
+    * `:distinct` - List of columns (atoms) that remove duplicate on query
+    * `:debug` - Show in console, the generated Ecto query before call
+    * `:limit` - Set the limit for the query
+    * `:offset` - Set the offset for the query
+
+  ## Example
+      Post.Api.exists(1)
+      Post.Api.exists(where: [title: "My Post"])
+  """
+  @doc group: "Query API"
+  @callback exists(id :: bitstring()) :: {:ok, true} | {:error, false}
+  @callback exists(options) :: {:ok, true} | {:error, false}
+
+  @doc """
+  Count an entity. Return the integer with the value
+
+  ### Options
+    * `:where` - The group conditions for WHERE argument in SQL that results in AND for any keys.
+    * `:or_where` - Using after `:where`, grouping conditions in a OR for WHERE argument in SQL.
+    * `:group` - Grouping query by fields
+    * `:distinct` - List of columns (atoms) that remove duplicate on query
+    * `:debug` - Show in console, the generated Ecto query before call
+    * `:limit` - Set the limit for the query
+    * `:offset` - Set the offset for the query
+
+  ## Example
+      Post.Api.count(where: [title: "My Post"])
+  """
+  @doc group: "Query API"
+  @callback count(options) :: integer()
+
+  @doc """
+  If the query has a limit, offset, distinct or combination set, it will be
+  automatically wrapped in a subquery in order to return the
+  proper result.
+
+  The aggregation will fail if any `group_by` field is set.
+
+  Calculate the given `aggregate`.
+
+  The `mode` is one of :avg | :count | :max | :min | :sum
+  ### Options
+    * `:where` - The group conditions for WHERE argument in SQL that results in AND for any keys.
+    * `:or_where` - Using after `:where`, grouping conditions in a OR for WHERE argument in SQL.
+    * `:group` - Grouping query by fields
+    * `:distinct` - List of columns (atoms) that remove duplicate on query
+    * `:debug` - Show in console, the generated Ecto query before call
+    * `:limit` - Set the limit for the query
+    * `:offset` - Set the offset for the query
+    * `:aggregate` - Settings of aggregate data
+
+  ## Example
+      Post.Api.aggregate(:count, :id, where: [title: "My Post"])
+  """
+  @doc group: "Query API"
+  @callback aggregate(mode :: :avg | :count | :max | :min | :sum, field :: atom(), options) :: integer()
 
   def get_module(model, key, _includes) do
     Ecto.build_assoc(model, key, %{})
@@ -406,6 +706,4 @@ defmodule Bee.Api do
   def unwrap({:ok, value}), do: value
   def unwrap(err), do: err
   def unwrap!({_, value}), do: value
-
-  defoverridable repo: 0
 end

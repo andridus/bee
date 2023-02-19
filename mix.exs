@@ -6,7 +6,7 @@ defmodule Bee.MixProject do
       name: "bee",
       source_url: "https://github.com/andridus/bee",
       app: :bee,
-      version: "0.1.0",
+      version: "0.2.0",
       elixir: "~> 1.12",
       start_permanent: Mix.env() == :prod,
       description: description(),
@@ -42,8 +42,7 @@ defmodule Bee.MixProject do
   defp deps do
     [
       {:ecto_sql, "~> 3.6"},
-      {:jason, "~> 1.2"},
-      {:value, "~> 0.1.0"},
+      {:value, "~> 0.1.1"},
       {:mix_test_watch, "~> 1.0", only: [:dev, :test], runtime: false},
       {:ecto_sqlite3, "~> 0.8.2", only: [:test]},
       {:ex_doc, "~> 0.14", only: :dev, runtime: false}
