@@ -25,8 +25,10 @@ For example, you could specify a `User` entity as follows:
       @schema User
       use Bee.Api
     end
-    
+
   end
+
+  
   User.Api.all(where: [permission: :basic])
 ```
 
