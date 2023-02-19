@@ -21,7 +21,7 @@ defmodule Bee do
           end
         end
 
-        defmodule User.Api do
+        defmodule Api do
           @schema User
           use Bee.Api
         end

@@ -21,14 +21,14 @@ For example, you could specify a `User` entity as follows:
       end
     end
 
-    defmodule User.Api do
+    defmodule Api do
       @schema User
       use Bee.Api
     end
 
   end
 
-  
+
   User.Api.all(where: [permission: :basic])
 ```
 
