@@ -6,7 +6,7 @@ defmodule Bee.MixProject do
       name: "bee",
       source_url: "https://github.com/andridus/bee",
       app: :bee,
-      version: "0.2.2",
+      version: "0.2.3",
       elixir: "~> 1.12",
       start_permanent: Mix.env() == :prod,
       description: description(),
