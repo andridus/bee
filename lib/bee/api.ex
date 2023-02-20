@@ -14,8 +14,8 @@ defmodule Bee.Api do
         apply(schema(), :"changeset_#{type}", [changeset, params])
       end
 
-      def json_fields(append) do
-        schema().bee_fields() ++ append
+      def json(entity) do
+        Map.take(entity, schema().bee_json())
       end
 
       def get_by(params \\ [where: [], order: [asc: :inserted_at]]) do
@@ -153,8 +153,8 @@ defmodule Bee.Api do
       def delete(id) when is_bitstring(id) or is_integer(id),
         do: id |> get!() |> delete()
 
-      def delete(model), do: model |> repo().delete()
       def delete(%Ecto.Changeset{} = changeset), do: changeset |> repo().delete()
+      def delete(model), do: model |> repo().delete()
 
       def default_params(params, sc \\ nil) do
         schm_ = sc || schema()
@@ -175,8 +175,14 @@ defmodule Bee.Api do
             lst =
               Enum.reduce(params, [], fn
                 {k, v}, acc ->
-                  {_k, opts} = schm_.bee_raw_fields() |> List.keyfind!(k, 0)
-                  [{k, default_params(v, opts[:schema])} | acc]
+                  relations = schm_.bee_relation_fields()
+
+                  if k in relations do
+                    {_k, opts} = schm_.bee_raw_fields() |> List.keyfind!(k, 0)
+                    [{k, default_params(v, opts[:type])} | acc]
+                  else
+                    raise "The '#{k}' field not exist in relation fields of '#{schm_}' only '#{relations}"
+                  end
 
                 k, acc when is_atom(k) ->
                   [k | acc]
@@ -200,7 +206,7 @@ defmodule Bee.Api do
           {:offset, params}, sch ->
             sch |> offset(^params)
 
-          {:inspect, true}, sch ->
+          {:debug, true}, sch ->
             IO.inspect(sch)
 
           _, sch ->
@@ -336,7 +342,7 @@ defmodule Bee.Api do
 
       defoverridable changeset: 2,
                      changeset: 3,
-                     json_fields: 1,
+                     json: 1,
                      get: 1,
                      get: 2,
                      get_by: 1,
@@ -344,7 +350,6 @@ defmodule Bee.Api do
                      insert: 1,
                      update: 1,
                      delete: 1,
-                     json: 2,
                      count: 1
     end
   end

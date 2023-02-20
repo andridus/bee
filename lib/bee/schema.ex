@@ -2,36 +2,104 @@ defmodule Bee.Schema do
   @moduledoc """
     Generate a Bee.Schema from valid ecto schema.
   """
-  defmacro __using__(_) do
+  defmacro __using__(opts) do
+    foreign_key_type = opts[:foreign_key_type] || :integer
+
+    timestamp_opts =
+      opts[:timestamp_opts] ||
+        [
+          type: :naive_datetime,
+          inserted_at: :inserted_at,
+          updated_at: :updated_at
+        ]
+
+    primary_key = opts[:primary_key] || {:id, :integer, autogenerate: true}
+
+    Module.register_attribute(__CALLER__.module, :bee_timestamp_opts, [])
+    Module.register_attribute(__CALLER__.module, :bee_foreign_key_type, [])
+    Module.register_attribute(__CALLER__.module, :bee_primary_key, [])
+    Module.put_attribute(__CALLER__.module, :bee_foreign_key_type, foreign_key_type)
+    Module.put_attribute(__CALLER__.module, :bee_primary_key, primary_key)
+    Module.put_attribute(__CALLER__.module, :bee_timestamp_opts, timestamp_opts)
+
     quote do
+      @behaviour Access
       require Bee.Schema
       import Bee.Schema
+      @before_compile Bee.Schema
+    end
+  end
+
+  defmacro __before_compile__(%{module: module}) do
+    quote do
+      defdelegate get(coin, key, default), to: Map
+      defdelegate fetch(coin, key), to: Map
+      defdelegate get_and_update(coin, key, func), to: Map
+      defdelegate pop(coin, key), to: Map
+
+      defimpl Jason.Encoder, for: unquote(module) do
+        def encode(value, opts) do
+          value
+          |> Map.drop([:__meta__, :__struct__])
+          |> Enum.reject(&match?({_, %Ecto.Association.NotLoaded{}}, &1))
+          |> Jason.Encode.keyword(opts)
+        end
+      end
     end
   end
 
   @relation_tags [:belongs_to, :has_one, :has_many, :many_to_many]
   @embed_tags [:embeds_many, :embeds_one]
   @fields_tags @relation_tags ++ @embed_tags ++ [:field, :timestamps]
-  defp map_opts(type_of, field, opts, type, acc) do
+  defp map_opts(type_of, field, line, opts, type, acc, bee_foreign_key_type) do
     bee_opts = opts[:bee] || []
-    opts = Keyword.drop(opts, [:bee])
 
+    other_attributes =
+      opts |> Enum.filter(&(elem(&1, 0) |> to_string() |> String.starts_with?("__")))
+
+    other_attributes_k = Keyword.keys(other_attributes)
+    bee_opts = bee_opts ++ other_attributes
+    opts = Keyword.drop(opts, [:bee | other_attributes_k])
     mapped_opts = opts ++ bee_opts ++ [type: type, type_of: type_of]
 
-    case type_of do
-      :belongs_to ->
-        fk = opts[:foreign_key] || :"#{field}_id"
-        [{:{}, [], [fk, mapped_opts]}, {:{}, [], [field, mapped_opts ++ [relation: true]]} | acc]
+    result =
+      case type_of do
+        :belongs_to ->
+          fk = opts[:foreign_key] || :"#{field}_id"
+          opts_foreign_key = Keyword.drop(mapped_opts, [:type]) ++ [type: bee_foreign_key_type]
+          opts_relation = Keyword.drop(mapped_opts, [:required]) ++ [relation: true]
+          [{:{}, [], [fk, opts_foreign_key]}, {:{}, [], [field, opts_relation]} | acc]
 
-      typeof when typeof in @relation_tags ->
-        [{:{}, [], [field, mapped_opts ++ [relation: true]]} | acc]
+        typeof when typeof in @relation_tags ->
+          opts = mapped_opts ++ [relation: true]
+          [{:{}, [], [field, opts]} | acc]
 
-      typeof when typeof in @embed_tags ->
-        [{:{}, [], [field, mapped_opts ++ [embed: true]]} | acc]
+        typeof when typeof in @embed_tags ->
+          [{:{}, [], [field, mapped_opts ++ [embed: true]]} | acc]
 
-      _ ->
-        [{:{}, [], [field, mapped_opts]} | acc]
-    end
+        _ ->
+          [{:{}, [], [field, mapped_opts]} | acc]
+      end
+
+    {{type_of, line, [field, type, opts]}, result}
+  end
+
+  defp map_timestamps(line, opts, bee_timestamp_opts, acc) do
+    bee_opts = opts[:bee] || []
+
+    other_attributes =
+      opts |> Enum.filter(&(elem(&1, 0) |> to_string() |> String.starts_with?("__")))
+
+    other_attributes_k = Keyword.keys(other_attributes)
+    bee_opts = bee_opts ++ other_attributes
+    opts = Keyword.drop(opts, [:bee | other_attributes_k])
+
+    type = bee_timestamp_opts[:type]
+    inserted_at = bee_timestamp_opts[:inserted_at] || :inserted_at
+    updated_at = bee_timestamp_opts[:updated_at] || :updated_at
+    mapped_opts = opts ++ bee_opts ++ [type: type, type_of: :timestamps, timestamps: true]
+    result = [{:{}, [], [inserted_at, mapped_opts]}, {:{}, [], [updated_at, mapped_opts]} | acc]
+    {{:timestamps, line, opts}, result}
   end
 
   @typedoc "Abstract Syntax Tree (AST)"
@@ -46,21 +114,36 @@ defmodule Bee.Schema do
   @spec generate_bee(t()) :: Macro.t()
   defmacro generate_bee(ast) do
     ast = ast[:do] || []
+    bee_foreign_key_type = Module.get_attribute(__CALLER__.module, :bee_foreign_key_type)
+    bee_timestamp_opts = Module.get_attribute(__CALLER__.module, :bee_timestamp_opts)
 
-    {_ast, raw_fields} =
+    {primary_key_id, primary_key_type, primary_key_opts} =
+      Module.get_attribute(__CALLER__.module, :bee_primary_key)
+
+    primary_key =
+      Macro.escape({primary_key_id, primary_key_opts |> Keyword.put(:type, primary_key_type)})
+
+    {ast, raw_fields} =
       Macro.postwalk(ast, [], fn
         {typeof, line, [field, type, opts]}, acc when typeof in @fields_tags ->
-          {{typeof, line, [field, type, opts]}, map_opts(typeof, field, [], type, acc)}
+          map_opts(typeof, field, line, opts, type, acc, bee_foreign_key_type)
 
         {typeof, line, [field, type]}, acc when typeof in @fields_tags ->
-          {{typeof, line, [field, type]}, map_opts(typeof, field, [], type, acc)}
+          map_opts(typeof, field, line, [], type, acc, bee_foreign_key_type)
+
+        {:timestamps, line, opts}, acc ->
+          map_timestamps(line, opts, bee_timestamp_opts, acc)
 
         any, acc ->
           {any, acc}
       end)
 
     quote do
+      def bee_primary_key, do: unquote(primary_key)
       def bee_raw_fields, do: unquote(raw_fields)
+
+      def bee_timestamps,
+        do: for({field, opt} <- unquote(raw_fields), opt[:timestamps], do: field)
 
       def bee_required_fields,
         do: for({field, opt} <- unquote(raw_fields), opt[:required], do: field)
@@ -73,43 +156,65 @@ defmodule Bee.Schema do
 
       def bee_embed_fields, do: for({field, opt} <- unquote(raw_fields), opt[:embed], do: field)
 
-      def bee_fields,
-        do: for({field, _opt} <- unquote(raw_fields), do: field) -- bee_relation_fields()
+      def bee_embed_raw_fields,
+        do: for({field, opt} <- unquote(raw_fields), opt[:embed], do: {field, opt[:type], opt})
 
-      defp changeset_(model, attrs, :insert) do
-        fields = bee_raw_fields()
+      def bee_fields,
+        do:
+          for({field, _opt} <- unquote(raw_fields), do: field) --
+            bee_relation_fields() -- bee_timestamps()
+
+      def bee_json, do: [:id | bee_fields()]
+
+      def changeset_(model, attrs, :insert) do
+        raw_fields = bee_raw_fields()
+        fields = bee_fields()
         assoc_fields = bee_relation_fields()
         embed_fields = bee_embed_fields()
+        raw_embed_fields = bee_embed_raw_fields()
         required_fields = bee_required_fields()
 
-        # flds = for {f, opt} <- bee_raw_fields, f in (fields ++ embed_fields), do: {f, opt}
-        flds = fields ++ embed_fields
+        flds = fields -- embed_fields
 
         model
         |> Ecto.Changeset.cast(attrs, flds)
         |> Ecto.Changeset.validate_required(required_fields)
+        |> (fn model ->
+              Enum.reduce(raw_embed_fields, model, fn {key, entity, _}, model ->
+                Ecto.Changeset.cast_embed(model, key, with: &entity.changeset_insert/2)
+              end)
+            end).()
         |> Map.put(:action, :insert)
       end
 
-      defp changeset_(model, attrs, :insert) do
-        fields = bee_raw_fields()
+      def changeset_(model, attrs, :update) do
+        raw_fields = bee_raw_fields()
+
         assoc_fields = bee_relation_fields()
         embed_fields = bee_embed_fields()
-        required_fields = bee_required_fields()
         not_update_fields = bee_not_update_fields()
+        required_fields = bee_required_fields() -- not_update_fields
+        raw_embed_fields = bee_embed_raw_fields()
+        fields = bee_fields() -- not_update_fields
 
-        # flds = for {f, opt} <- bee_raw_fields, f in (fields ++ embed_fields), do: {f, opt}
-        flds = fields ++ (embed_fields -- not_update_fields)
-        required_fields = required_fields -- not_update_fields
+        flds = fields -- embed_fields
 
-        model
-        |> Ecto.Changeset.cast(attrs, flds)
-        |> Ecto.Changeset.validate_required(required_fields)
-        |> Map.put(:action, :update)
+        model =
+          model
+          |> Ecto.Changeset.cast(attrs, flds)
+          |> Ecto.Changeset.validate_required(required_fields)
+          |> (fn model ->
+                Enum.reduce(raw_embed_fields, model, fn {key, entity, _}, model ->
+                  Ecto.Changeset.cast_embed(model, key, with: &entity.changeset_update/2)
+                end)
+              end).()
+          |> Map.put(:action, :update)
       end
 
       def changeset_insert(model, attrs), do: changeset_(model, attrs, :insert)
+
       def changeset_update(model, attrs), do: changeset_(model, attrs, :update)
+
       unquote(ast)
 
       defoverridable changeset_insert: 2, changeset_update: 2
