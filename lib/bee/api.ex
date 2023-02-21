@@ -1,4 +1,6 @@
 defmodule Bee.Api do
+  import Ecto.Query
+
   @moduledoc """
     Generate an Api for  repository.
   """
@@ -28,7 +30,7 @@ defmodule Bee.Api do
 
       def get_by!(params \\ [where: [], order: [asc: :inserted_at]]) do
         params
-        |> default_params()
+        |> default_params(schema())
         |> repo().one()
       end
 
@@ -45,13 +47,13 @@ defmodule Bee.Api do
 
       def get!(id, params \\ [where: [], order: [asc: :inserted_at]]) do
         params
-        |> default_params()
+        |> default_params(schema())
         |> repo().get(id)
       end
 
       def all(params \\ [where: [], order: []]) do
         params
-        |> default_params()
+        |> default_params(schema())
         |> repo().all()
       end
 
@@ -117,7 +119,8 @@ defmodule Bee.Api do
       rescue
         _ ->
           if is_nil(opts[:error_silent]) do
-            raise "The function `changeset_delete` is not defined for `#{schema()}`."
+            reraise "The function `changeset_delete` is not defined for `#{schema()}`.",
+                    __STACKTRACE__
           else
             model
           end
@@ -131,7 +134,7 @@ defmodule Bee.Api do
         if is_nil(batch) do
           {num, _} =
             [where: [{{:in, :id}, ids}]]
-            |> default_params()
+            |> default_params(schema())
             |> repo().delete_all(options)
 
           {:ok, %{total: total, deleted: num}}
@@ -141,7 +144,7 @@ defmodule Bee.Api do
             |> Enum.chunk_every(batch)
             |> Enum.map(fn ids1 ->
               [where: [{{:in, :id}, ids1}]]
-              |> default_params()
+              |> default_params(schema())
               |> repo().delete_all(options)
             end)
             |> Enum.reduce(0, fn {num, _}, acc -> acc + num end)
@@ -156,159 +159,12 @@ defmodule Bee.Api do
       def delete(%Ecto.Changeset{} = changeset), do: changeset |> repo().delete()
       def delete(model), do: model |> repo().delete()
 
-      def default_params(params, sc \\ nil) do
-        schm_ = sc || schema()
-        sch = from(schm_)
-
-        params
-        |> Enum.reduce(sch, fn
-          {:where, params}, sch ->
-            sch |> where(^default_conditions(params))
-
-          {:or_where, params}, sch ->
-            sch |> or_where(^default_conditions(params))
-
-          {:order, params}, sch ->
-            sch |> order_by(^params)
-
-          {:preload, params}, sch ->
-            lst =
-              Enum.reduce(params, [], fn
-                {k, v}, acc ->
-                  relations = schm_.bee_relation_fields()
-
-                  if k in relations do
-                    {_k, opts} = schm_.bee_raw_fields() |> List.keyfind!(k, 0)
-                    [{k, default_params(v, opts[:type])} | acc]
-                  else
-                    raise "The '#{k}' field not exist in relation fields of '#{schm_}' only '#{relations}"
-                  end
-
-                k, acc when is_atom(k) ->
-                  [k | acc]
-              end)
-              |> Enum.reverse()
-
-            sch |> preload(^lst)
-
-          {:select, params}, sch ->
-            sch |> select([c], map(c, ^params))
-
-          {:group, params}, sch ->
-            sch |> group_by(^params)
-
-          {:distinct, params}, sch ->
-            sch |> distinct(^params)
-
-          {:limit, params}, sch ->
-            sch |> limit(^params)
-
-          {:offset, params}, sch ->
-            sch |> offset(^params)
-
-          {:debug, true}, sch ->
-            IO.inspect(sch)
-
-          _, sch ->
-            sch
-        end)
-      end
-
-      defp default_conditions(params) do
-        Enum.reduce(params, nil, fn
-          {{:lt, key}, value}, conditions ->
-            if is_nil(conditions) do
-              dynamic([p], field(p, ^key) < ^value)
-            else
-              dynamic([p], field(p, ^key) < ^value and ^conditions)
-            end
-
-          {{:elt, key}, value}, conditions ->
-            if is_nil(conditions) do
-              dynamic([p], field(p, ^key) <= ^value)
-            else
-              dynamic([p], field(p, ^key) <= ^value and ^conditions)
-            end
-
-          {{:gt, key}, value}, conditions ->
-            if is_nil(conditions) do
-              dynamic([p], field(p, ^key) >= ^value)
-            else
-              dynamic([p], field(p, ^key) >= ^value and ^conditions)
-            end
-
-          {{:egt, key}, value}, conditions ->
-            if is_nil(conditions) do
-              dynamic([p], field(p, ^key) > ^value)
-            else
-              dynamic([p], field(p, ^key) > ^value and ^conditions)
-            end
-
-          {{:ilike, key}, value}, conditions ->
-            value = "%#{value}%"
-
-            if is_nil(conditions) do
-              dynamic([p], ilike(field(p, ^key), ^value))
-            else
-              dynamic([p], ilike(field(p, ^key), ^value) and ^conditions)
-            end
-
-          {{:in, key}, value}, conditions ->
-            if is_nil(conditions) do
-              dynamic([p], field(p, ^key) in ^value)
-            else
-              dynamic([p], field(p, ^key) in ^value and ^conditions)
-            end
-
-          # {{:ago, key}, {value, opt}}, conditions ->
-          #   if is_nil(conditions) do
-          #     dynamic([p], ago(field(p, ^key), ^value, ^opt))
-          #   else
-          #     dynamic([p], ago(field(p, ^key), ^value, ^opt) and ^conditions)
-          #   end
-
-          # {{:date_add, key}, {value, opt}}, conditions ->
-          #     if is_nil(conditions) do
-          #       dynamic([p], date_add(field(p, ^key), ^value, ^opt))
-          #     else
-          #       dynamic([p], date_add(field(p, ^key), ^value, ^opt) and ^conditions)
-          #     end
-          # {{:datetime_add, key}, {value, opt}}, conditions ->
-          #   if is_nil(conditions) do
-          #     dynamic([p], datetime_add(field(p, ^key), ^value, ^opt))
-          #   else
-          #     dynamic([p], datetime_add(field(p, ^key), ^value, ^opt) and ^conditions)
-          #   end
-          {:not_nil, key}, conditions ->
-            if is_nil(conditions) do
-              dynamic([p], not is_nil(field(p, ^key)))
-            else
-              dynamic([p], not is_nil(field(p, ^key)) and ^conditions)
-            end
-
-          {key, nil}, conditions ->
-            if is_nil(conditions) do
-              dynamic([p], is_nil(field(p, ^key)))
-            else
-              dynamic([p], is_nil(field(p, ^key)) and ^conditions)
-            end
-
-          {key, value}, conditions ->
-            if is_nil(conditions) do
-              dynamic([p], field(p, ^key) == ^value)
-            else
-              dynamic([p], field(p, ^key) == ^value and ^conditions)
-            end
-        end)
-        |> Kernel.||([])
-      end
-
       def exists?(id) when is_bitstring(id),
         do: exists?(where: [id: id])
 
       def exists?(params) do
         params
-        |> default_params()
+        |> default_params(schema())
         |> repo().exists?()
       end
 
@@ -326,7 +182,7 @@ defmodule Bee.Api do
 
       def aggregate(mode, field, params \\ []) do
         params
-        |> default_params()
+        |> default_params(schema())
         |> repo().aggregate(mode, field)
       end
 
@@ -339,6 +195,131 @@ defmodule Bee.Api do
       def insert_or_update(model), do: insert(model)
 
       def repo, do: unquote(args)[:repo] || Application.get_env(:bee, :repo)
+
+      def params_to_query(params) do
+        limit = params[:limit]
+        offset = params[:offset]
+
+        permission = params[:permission]
+        fields = params[:fields]
+        assocs = params[:assocs]
+        filter = params[:filter]
+
+        {fields, assocs}
+        |> parse_fields(schema(), permission)
+        |> parse_filter(filter)
+        |> maybe_add(:offset, offset)
+        |> maybe_add(:limit, limit)
+      end
+
+      defp parse_filter(query, nil), do: query
+
+      defp parse_filter(query, _filter) do
+        Keyword.put(query, :where, [])
+      end
+
+      defp parse_fields({nil, nil}, _module, _permission), do: []
+
+      defp parse_fields({fields, _assocs}, module, permission) when is_bitstring(fields) do
+        fields = for str <- String.split(fields, ","), do: String.trim(str)
+        normalize_fields(fields, module, permission)
+      end
+
+      defp parse_fields({nil, assocs}, module, permission) when is_bitstring(assocs) do
+        fields = for str <- String.split(assocs, ","), do: String.trim(str)
+        normalize_assocs(fields, module, permission)
+      end
+
+      defp parse_fields(_, _module, _permission), do: []
+
+      defp normalize_fields(fields, module, permission) do
+        exposed = for atom <- module.bee_permission(permission), do: to_string(atom)
+
+        assoc_fields =
+          for flds <- fields, String.contains?(flds, "."), do: String.split(flds, ".")
+
+        simple_fields =
+          for flds <- fields,
+              !String.contains?(flds, "."),
+              flds in exposed,
+              do: String.to_existing_atom(flds)
+
+        assoc_fields_str = for atom <- module.bee_relation_fields(), do: to_string(atom)
+
+        preload =
+          for [parent | tail] <- assoc_fields,
+              parent in assoc_fields_str,
+              do: {String.to_existing_atom(parent), normalize_fields(tail, module, permission)}
+
+        if length(preload) > 0 do
+          [{:preload, preload}]
+        else
+          []
+        end
+        |> Keyword.put(:select, simple_fields)
+      end
+
+      defp normalize_assocs(fields, module, permission) do
+        assoc_modules =
+          for {f, :relation_type, opt} <- module.__live_fields__, do: {f, opt[:schema]}
+
+        assoc_fields = Enum.map(fields, &String.split(&1, "."))
+        assoc_fields_str = for atom <- module.__assoc_fields__, do: to_string(atom)
+
+        preload =
+          recursive_assoc(assoc_fields, assoc_fields_str, assoc_modules, permission)
+          |> List.flatten()
+
+        if length(preload) > 0 do
+          [{:preload, preload}]
+        else
+          []
+        end
+      end
+
+      defp recursive_assoc([], _assoc_fields_str, _assoc_modules, _permission), do: []
+
+      defp recursive_assoc([parent], assoc_fields_str, assoc_modules, permission) do
+        if parent in assoc_fields_str, do: [String.to_existing_atom(parent)], else: []
+      end
+
+      defp recursive_assoc([parent | tail], assoc_fields_str, assoc_modules, permission) do
+        if parent in assoc_fields_str do
+          [
+            deep_assocs(
+              String.to_existing_atom(parent),
+              tail,
+              assoc_modules[String.to_existing_atom(parent)],
+              permission
+            )
+            | recursive_assoc(tail, assoc_fields_str, assoc_modules, permission)
+          ]
+        else
+          [[] | recursive_assoc(tail, assoc_fields_str, assoc_modules, permission)]
+        end
+      end
+
+      defp deep_assocs(assoc, [], _module, _permission), do: assoc
+
+      defp deep_assocs(assoc, assoc_fields, module, permission) do
+        assoc_modules =
+          for {f, :relation_type, opt} <- module.__live_fields__, do: {f, opt[:schema]}
+
+        assoc_fields_str = for atom <- module.__assoc_fields__, do: to_string(atom)
+
+        preload =
+          recursive_assoc(assoc_fields, assoc_fields_str, assoc_modules, permission)
+          |> List.flatten()
+
+        case preload do
+          [] -> [assoc]
+          preload when is_list(preload) or is_atom(preload) -> [{assoc, [{:preload, preload}]}]
+          _ -> []
+        end
+      end
+
+      defp maybe_add(opt, _key, nil), do: opt
+      defp maybe_add(opt, key, value), do: Keyword.put(opt, key, value)
 
       defoverridable changeset: 2,
                      changeset: 3,
@@ -676,4 +657,162 @@ defmodule Bee.Api do
   @doc group: "Query API"
   @callback aggregate(mode :: :avg | :count | :max | :min | :sum, field :: atom(), options) ::
               integer()
+
+  @type p_option ::
+          {:limit, integer()}
+          | {:offset, integer()}
+          | {:permissions, list(atom())}
+          | {:assocs, list(atom())}
+          | {:filter | list(atom())}
+  @type prepare_options :: [p_option()]
+
+  @doc """
+  Prepare query from params.
+
+  ### Options
+    * `:limit` - Limit of rows
+    * `:offset` - Offset of rows.
+    * `:permission` - Permission for show fields
+    * `:fields` - List fields to return
+    * `:assocs` - List assoc to preload
+    * `:filter` - Filters
+
+  ## Example
+      Post.Api.params_to_query([])
+  """
+  @callback params_to_query(prepare_options(), struct()) :: list(any())
+
+  ### Functions
+  def default_params(params, default_schema_, sc \\ nil) do
+    schm_ = sc || default_schema_
+    sch = from(schm_)
+
+    params
+    |> Enum.reduce(sch, fn
+      {:where, params}, sch ->
+        sch |> where(^default_conditions(params))
+
+      {:or_where, params}, sch ->
+        sch |> or_where(^default_conditions(params))
+
+      {:order, params}, sch ->
+        sch |> order_by(^params)
+
+      {:preload, params}, sch ->
+        lst =
+          Enum.reduce(params, [], fn
+            {k, v}, acc ->
+              relations = schm_.bee_relation_fields()
+
+              if k in relations do
+                {_k, opts} = schm_.bee_raw_fields() |> List.keyfind!(k, 0)
+                [{k, default_params(v, default_schema_, opts[:type])} | acc]
+              else
+                raise "The '#{k}' field not exist in relation fields of '#{schm_}' only '#{relations}"
+              end
+
+            k, acc when is_atom(k) ->
+              [k | acc]
+          end)
+          |> Enum.reverse()
+
+        sch |> preload(^lst)
+
+      {:select, params}, sch ->
+        sch |> select([c], map(c, ^params))
+
+      {:group, params}, sch ->
+        sch |> group_by(^params)
+
+      {:distinct, params}, sch ->
+        sch |> distinct(^params)
+
+      {:limit, params}, sch ->
+        sch |> limit(^params)
+
+      {:offset, params}, sch ->
+        sch |> offset(^params)
+
+      {:debug, true}, sch ->
+        IO.puts(sch)
+
+      _, sch ->
+        sch
+    end)
+  end
+
+  defp default_conditions(params, conditions \\ nil) do
+    Enum.reduce(params, nil, &default_conditions_map(&1, &2)) |> Kernel.||([])
+  end
+
+  defp default_conditions_map(nil, conditions), do: conditions
+  defp default_conditions_map({key, {:lt, value}}, nil), do: dynamic([p], field(p, ^key) < ^value)
+
+  defp default_conditions_map({key, {:lt, value}}, conditions),
+    do: dynamic([p], field(p, ^key) < ^value and ^conditions)
+
+  defp default_conditions_map({key, {:elt, value}}, nil),
+    do: dynamic([p], field(p, ^key) <= ^value)
+
+  defp default_conditions_map({key, {:elt, value}}, conditions),
+    do: dynamic([p], field(p, ^key) <= ^value and ^conditions)
+
+  defp default_conditions_map({key, {:gt, value}}, nil), do: dynamic([p], field(p, ^key) > ^value)
+
+  defp default_conditions_map({key, {:gt, value}}, conditions),
+    do: dynamic([p], field(p, ^key) > ^value and ^conditions)
+
+  defp default_conditions_map({key, {:egt, value}}, nil),
+    do: dynamic([p], field(p, ^key) >= ^value)
+
+  defp default_conditions_map({key, {:egt, value}}, conditions),
+    do: dynamic([p], field(p, ^key) >= ^value and ^conditions)
+
+  defp default_conditions_map({key, {:ilike, value}}, nil),
+    do: dynamic([p], ilike(field(p, ^key), ^"%#{value}%"))
+
+  defp default_conditions_map({key, {:ilike, value}}, conditions),
+    do: dynamic([p], ilike(field(p, ^key), ^"%#{value}%") and ^conditions)
+
+  defp default_conditions_map({key, {:in, value}}, nil),
+    do: dynamic([p], field(p, ^key) in ^value)
+
+  defp default_conditions_map({key, {:in, value}}, conditions),
+    do: dynamic([p], field(p, ^key) in ^value and ^conditions)
+
+  defp default_conditions_map({key, {:not, nil}}, nil),
+    do: dynamic([p], not is_nil(field(p, ^key)))
+
+  defp default_conditions_map({key, {:not, nil}}, conditions),
+    do: dynamic([p], not is_nil(field(p, ^key)) and ^conditions)
+
+  defp default_conditions_map({key, nil}, nil), do: dynamic([p], is_nil(field(p, ^key)))
+
+  defp default_conditions_map({key, nil}, conditions),
+    do: dynamic([p], is_nil(field(p, ^key)) and ^conditions)
+
+  defp default_conditions_map({key, value}, nil), do: dynamic([p], field(p, ^key) == ^value)
+
+  defp default_conditions_map({key, value}, conditions),
+    do: dynamic([p], field(p, ^key) == ^value and ^conditions)
+
+  # {{:ago, key}, {value, opt}}, conditions ->
+  #   if is_nil(conditions) do
+  #     dynamic([p], ago(field(p, ^key), ^value, ^opt))
+  #   else
+  #     dynamic([p], ago(field(p, ^key), ^value, ^opt) and ^conditions)
+  #   end
+
+  # {{:date_add, key}, {value, opt}}, conditions ->
+  #     if is_nil(conditions) do
+  #       dynamic([p], date_add(field(p, ^key), ^value, ^opt))
+  #     else
+  #       dynamic([p], date_add(field(p, ^key), ^value, ^opt) and ^conditions)
+  #     end
+  # {{:datetime_add, key}, {value, opt}}, conditions ->
+  #   if is_nil(conditions) do
+  #     dynamic([p], datetime_add(field(p, ^key), ^value, ^opt))
+  #   else
+  #     dynamic([p], datetime_add(field(p, ^key), ^value, ^opt) and ^conditions)
+  #   end
 end

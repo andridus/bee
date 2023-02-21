@@ -44,7 +44,8 @@ defmodule Bee.MixProject do
       {:ecto_sql, "~> 3.6"},
       {:mix_test_watch, "~> 1.0", only: [:dev, :test], runtime: false},
       {:ecto_sqlite3, "~> 0.8.2", only: [:test]},
-      {:ex_doc, "~> 0.14", only: :dev, runtime: false}
+      {:ex_doc, "~> 0.14", only: :dev, runtime: false},
+      {:credo, "~> 1.6", only: [:dev, :test], runtime: false}
     ]
   end
 end

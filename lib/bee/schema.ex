@@ -23,6 +23,7 @@ defmodule Bee.Schema do
     Module.put_attribute(__CALLER__.module, :bee_timestamp_opts, timestamp_opts)
 
     quote do
+      Module.register_attribute(__MODULE__, :bee_permission_def, accumulate: true)
       @behaviour Access
       require Bee.Schema
       import Bee.Schema
@@ -31,7 +32,30 @@ defmodule Bee.Schema do
   end
 
   defmacro __before_compile__(%{module: module}) do
+    permissions = Module.get_attribute(module, :bee_permission_def)
+
+    funcs =
+      for {atom, list, extends} <- permissions do
+        if !is_nil(extends) and is_atom(extends) do
+          quote do
+            def bee_permission(unquote(atom)),
+              do:
+                [bee_permission(unquote(extends)) ++ unquote(list)]
+                |> List.flatten()
+                |> Enum.uniq()
+          end
+        else
+          quote do
+            def bee_permission(unquote(atom)), do: unquote(list) |> Enum.uniq()
+          end
+        end
+      end
+
     quote do
+      def bee_permission(nil), do: bee_json()
+      unquote(funcs)
+      def bee_permission(atom), do: raise("Permission '#{atom}' dont exists")
+
       defdelegate get(coin, key, default), to: Map
       defdelegate fetch(coin, key), to: Map
       defdelegate get_and_update(coin, key, func), to: Map
@@ -111,6 +135,31 @@ defmodule Bee.Schema do
   @typedoc "Represents literals in the AST"
   @type literal :: atom | number | binary | fun | {t, t} | [t]
 
+  @spec permission(atom(), list(atom())) :: Macro.t()
+  defmacro permission(atom, list) do
+    atom = Macro.escape(atom)
+    list = Macro.escape(list)
+
+    quote do
+      Module.put_attribute(__MODULE__, :bee_permission_def, {unquote(atom), unquote(list), nil})
+    end
+  end
+
+  @spec permission(atom(), list(atom()), keyword()) :: Macro.t()
+  defmacro permission(atom, list, opts) do
+    atom = Macro.escape(atom)
+    list = Macro.escape(list)
+    extends = Macro.escape(opts[:extends])
+
+    quote do
+      Module.put_attribute(
+        __MODULE__,
+        :bee_permission_def,
+        {unquote(atom), unquote(list), unquote(extends)}
+      )
+    end
+  end
+
   @spec generate_bee(t()) :: Macro.t()
   defmacro generate_bee(ast) do
     ast = ast[:do] || []
@@ -164,7 +213,7 @@ defmodule Bee.Schema do
           for({field, _opt} <- unquote(raw_fields), do: field) --
             bee_relation_fields() -- bee_timestamps()
 
-      def bee_json, do: [:id | bee_fields()]
+      def bee_json, do: [:id | bee_fields()] ++ bee_timestamps()
 
       def changeset_(model, attrs, :insert) do
         raw_fields = bee_raw_fields()
