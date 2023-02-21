@@ -75,7 +75,7 @@ defmodule Bee.Schema do
   @relation_tags [:belongs_to, :has_one, :has_many, :many_to_many]
   @embed_tags [:embeds_many, :embeds_one]
   @fields_tags @relation_tags ++ @embed_tags ++ [:field, :timestamps]
-  defp map_opts(type_of, field, line, opts, type, acc, bee_foreign_key_type) do
+  defp map_opts(type_of, field, line, opts, type, acc, bee_foreign_key_type, module_fk) do
     bee_opts = opts[:bee] || []
 
     other_attributes =
@@ -91,11 +91,15 @@ defmodule Bee.Schema do
         :belongs_to ->
           fk = opts[:foreign_key] || :"#{field}_id"
           opts_foreign_key = Keyword.drop(mapped_opts, [:type]) ++ [type: bee_foreign_key_type]
-          opts_relation = Keyword.drop(mapped_opts, [:required]) ++ [relation: true]
+
+          opts_relation =
+            Keyword.drop(mapped_opts, [:required]) ++ [relation: true, foreign_key: fk]
+
           [{:{}, [], [fk, opts_foreign_key]}, {:{}, [], [field, opts_relation]} | acc]
 
         typeof when typeof in @relation_tags ->
-          opts = mapped_opts ++ [relation: true]
+          fk = opts[:foreign_key] || module_fk
+          opts = mapped_opts ++ [relation: true, foreign_key: fk]
           [{:{}, [], [field, opts]} | acc]
 
         typeof when typeof in @embed_tags ->
@@ -160,14 +164,39 @@ defmodule Bee.Schema do
     end
   end
 
+  def convert_module_to_atom(nil), do: nil
+
+  def convert_module_to_atom(module),
+    do:
+      module
+      |> Module.split()
+      |> Enum.reverse()
+      |> List.first()
+      |> String.downcase()
+      |> String.to_atom()
+
+  def convert_module_to_foreign_key(nil), do: nil
+
+  def convert_module_to_foreign_key(module),
+    do:
+      module
+      |> Module.split()
+      |> Enum.reverse()
+      |> List.first()
+      |> String.downcase()
+      |> Kernel.<>("_id")
+      |> String.to_atom()
+
   @spec generate_bee(t()) :: Macro.t()
   defmacro generate_bee(ast) do
     ast = ast[:do] || []
-    bee_foreign_key_type = Module.get_attribute(__CALLER__.module, :bee_foreign_key_type)
-    bee_timestamp_opts = Module.get_attribute(__CALLER__.module, :bee_timestamp_opts)
+    module = __CALLER__.module
+    bee_foreign_key_type = Module.get_attribute(module, :bee_foreign_key_type)
+    bee_timestamp_opts = Module.get_attribute(module, :bee_timestamp_opts)
+    module_fk = convert_module_to_foreign_key(module)
 
     {primary_key_id, primary_key_type, primary_key_opts} =
-      Module.get_attribute(__CALLER__.module, :bee_primary_key)
+      Module.get_attribute(module, :bee_primary_key)
 
     primary_key =
       Macro.escape({primary_key_id, primary_key_opts |> Keyword.put(:type, primary_key_type)})
@@ -175,10 +204,10 @@ defmodule Bee.Schema do
     {ast, raw_fields} =
       Macro.postwalk(ast, [], fn
         {typeof, line, [field, type, opts]}, acc when typeof in @fields_tags ->
-          map_opts(typeof, field, line, opts, type, acc, bee_foreign_key_type)
+          map_opts(typeof, field, line, opts, type, acc, bee_foreign_key_type, module_fk)
 
         {typeof, line, [field, type]}, acc when typeof in @fields_tags ->
-          map_opts(typeof, field, line, [], type, acc, bee_foreign_key_type)
+          map_opts(typeof, field, line, [], type, acc, bee_foreign_key_type, module_fk)
 
         {:timestamps, line, opts}, acc ->
           map_timestamps(line, opts, bee_timestamp_opts, acc)
@@ -202,6 +231,14 @@ defmodule Bee.Schema do
 
       def bee_relation_fields,
         do: for({field, opt} <- unquote(raw_fields), opt[:relation], do: field)
+
+      def bee_relation_raw_fields,
+        do:
+          for(
+            {field, opt} <- unquote(raw_fields),
+            opt[:relation],
+            do: {field, {opt[:type], opt[:foreign_key]}}
+          )
 
       def bee_embed_fields, do: for({field, opt} <- unquote(raw_fields), opt[:embed], do: field)
 

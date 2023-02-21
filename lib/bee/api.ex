@@ -685,12 +685,43 @@ defmodule Bee.Api do
   ### Functions
   def default_params(params, default_schema_, sc \\ nil) do
     schm_ = sc || default_schema_
+    schema_fields = [:id | schm_.bee_raw_fields() |> Keyword.keys()]
+    schema_relation_fields = schm_.bee_relation_fields()
+    fields_keys = (params[:where] || []) |> Keyword.keys()
+
+    relations_keys =
+      (params[:preload] || [])
+      |> Enum.map(fn
+        {atom, _} -> atom
+        atom -> atom
+      end)
+
+    # check if all keys are fields
+    _ =
+      Enum.filter(fields_keys, &(&1 not in schema_fields))
+      |> case do
+        [] -> nil
+        fields -> raise "Fields [#{Enum.join(fields, ", ")}] not present in schema '#{schm_}'"
+      end
+
+    # check if all keys are relations
+    _ =
+      Enum.filter(relations_keys, &(&1 not in schema_relation_fields))
+      |> case do
+        [] -> nil
+        fields -> raise "Fields [#{Enum.join(fields, ", ")}] not present in relations '#{schm_}'"
+      end
+
     sch = from(schm_)
 
     params
     |> Enum.reduce(sch, fn
       {:where, params}, sch ->
-        sch |> where(^default_conditions(params))
+        do_where(params, sch, schm_, nil)
+        |> case do
+          {query, nil} -> query
+          {query, conditions} -> query |> where(^conditions)
+        end
 
       {:or_where, params}, sch ->
         sch |> or_where(^default_conditions(params))
@@ -734,85 +765,169 @@ defmodule Bee.Api do
         sch |> offset(^params)
 
       {:debug, true}, sch ->
-        IO.puts(sch)
+        IO.inspect(sch)
 
       _, sch ->
         sch
     end)
   end
 
-  defp default_conditions(params, conditions \\ nil) do
-    Enum.reduce(params, nil, &default_conditions_map(&1, &2)) |> Kernel.||([])
+  def do_where(params, sch, schm_, parent) do
+    relations = for {key, value} <- params, is_list(value), do: {key, value}
+    params = for {key, value} <- params, !is_list(value), do: {key, value}
+    {query, _} = maybe_join(sch, relations, schm_, parent)
+    default_conditions = default_conditions(params, nil, parent)
+    {query, default_conditions}
   end
 
-  defp default_conditions_map(nil, conditions), do: conditions
-  defp default_conditions_map({key, {:lt, value}}, nil), do: dynamic([p], field(p, ^key) < ^value)
+  defp maybe_join(query, params, schm_, parent) do
+    relation_fields = schm_.bee_relation_raw_fields()
 
-  defp default_conditions_map({key, {:lt, value}}, conditions),
-    do: dynamic([p], field(p, ^key) < ^value and ^conditions)
+    {query, _} =
+      params
+      |> Enum.with_index(1)
+      |> Enum.reduce({query, []}, fn {{rel, _wh}, idx}, {query, joins} ->
+        {schm_, fk} = relation_fields[rel]
 
-  defp default_conditions_map({key, {:elt, value}}, nil),
-    do: dynamic([p], field(p, ^key) <= ^value)
+        if is_nil(schm_) do
+          query
+        else
+          params =
+            params[rel] |> Keyword.drop([:__COUNT__, :__SUM__, :__MAX__, :__MIN__, :__AVG__])
 
-  defp default_conditions_map({key, {:elt, value}}, conditions),
-    do: dynamic([p], field(p, ^key) <= ^value and ^conditions)
+          #
+          vars =
+            if is_nil(parent) do
+              vars1 = for i <- 0..(idx - 1), do: {:"a#{i}", [], __MODULE__}
+              vars1 ++ [{:p, [], nil}]
+            else
+              [{parent, {:a0, [], nil}}]
+            end
 
-  defp default_conditions_map({key, {:gt, value}}, nil), do: dynamic([p], field(p, ^key) > ^value)
+          query1 = Macro.escape(query)
+          parent_atom = String.to_atom("#{parent || "root"}_#{rel}")
 
-  defp default_conditions_map({key, {:gt, value}}, conditions),
-    do: dynamic([p], field(p, ^key) > ^value and ^conditions)
+          {query, _} =
+            Code.eval_quoted(
+              quote do
+                query =
+                  join(unquote(query1), :inner, unquote(vars), p in assoc(a0, unquote(rel)),
+                    as: unquote(parent_atom)
+                  )
 
-  defp default_conditions_map({key, {:egt, value}}, nil),
-    do: dynamic([p], field(p, ^key) >= ^value)
+                {query1, conditions} =
+                  Bee.Api.do_where(unquote(params), query, unquote(schm_), unquote(parent_atom))
 
-  defp default_conditions_map({key, {:egt, value}}, conditions),
-    do: dynamic([p], field(p, ^key) >= ^value and ^conditions)
+                query1
+                |> where(^conditions)
+              end
+            )
 
-  defp default_conditions_map({key, {:ilike, value}}, nil),
-    do: dynamic([p], ilike(field(p, ^key), ^"%#{value}%"))
+          {query, [{rel, schm_, fk}, joins]}
+        end
+      end)
 
-  defp default_conditions_map({key, {:ilike, value}}, conditions),
-    do: dynamic([p], ilike(field(p, ^key), ^"%#{value}%") and ^conditions)
+    {query, nil}
+  end
 
-  defp default_conditions_map({key, {:in, value}}, nil),
-    do: dynamic([p], field(p, ^key) in ^value)
+  def default_conditions(params, conditions \\ nil, parent \\ nil) do
+    {code, _} =
+      Enum.reduce(params, conditions, &default_conditions_map(parent, &1, &2))
+      |> Code.eval_quoted()
 
-  defp default_conditions_map({key, {:in, value}}, conditions),
-    do: dynamic([p], field(p, ^key) in ^value and ^conditions)
+    code
+  end
 
-  defp default_conditions_map({key, {:not, nil}}, nil),
-    do: dynamic([p], not is_nil(field(p, ^key)))
+  defp default_conditions_map(_parent, nil, conditions), do: conditions
 
-  defp default_conditions_map({key, {:not, nil}}, conditions),
-    do: dynamic([p], not is_nil(field(p, ^key)) and ^conditions)
+  defp default_conditions_map(parent, {key, {:eq, value}}, conditions),
+    do: generic_conditions(parent, {key, :==, value}, conditions)
 
-  defp default_conditions_map({key, nil}, nil), do: dynamic([p], is_nil(field(p, ^key)))
+  defp default_conditions_map(parent, {key, {:lt, value}}, conditions),
+    do: generic_conditions(parent, {key, :<, value}, conditions)
 
-  defp default_conditions_map({key, nil}, conditions),
-    do: dynamic([p], is_nil(field(p, ^key)) and ^conditions)
+  defp default_conditions_map(parent, {key, {:elt, value}}, conditions),
+    do: generic_conditions(parent, {key, :<=, value}, conditions)
 
-  defp default_conditions_map({key, value}, nil), do: dynamic([p], field(p, ^key) == ^value)
+  defp default_conditions_map(parent, {key, {:gt, value}}, conditions),
+    do: generic_conditions(parent, {key, :>, value}, conditions)
 
-  defp default_conditions_map({key, value}, conditions),
-    do: dynamic([p], field(p, ^key) == ^value and ^conditions)
+  defp default_conditions_map(parent, {key, {:egt, value}}, conditions),
+    do: generic_conditions(parent, {key, :>=, value}, conditions)
 
-  # {{:ago, key}, {value, opt}}, conditions ->
-  #   if is_nil(conditions) do
-  #     dynamic([p], ago(field(p, ^key), ^value, ^opt))
-  #   else
-  #     dynamic([p], ago(field(p, ^key), ^value, ^opt) and ^conditions)
-  #   end
+  defp default_conditions_map(parent, {key, {:ilike, value}}, conditions),
+    do: generic_conditions(parent, {key, :ilike, value}, conditions)
 
-  # {{:date_add, key}, {value, opt}}, conditions ->
-  #     if is_nil(conditions) do
-  #       dynamic([p], date_add(field(p, ^key), ^value, ^opt))
-  #     else
-  #       dynamic([p], date_add(field(p, ^key), ^value, ^opt) and ^conditions)
-  #     end
-  # {{:datetime_add, key}, {value, opt}}, conditions ->
-  #   if is_nil(conditions) do
-  #     dynamic([p], datetime_add(field(p, ^key), ^value, ^opt))
-  #   else
-  #     dynamic([p], datetime_add(field(p, ^key), ^value, ^opt) and ^conditions)
-  #   end
+  defp default_conditions_map(parent, {key, {:in, value}}, conditions),
+    do: generic_conditions(parent, {key, :in, value}, conditions)
+
+  defp default_conditions_map(parent, {key, {:not, nil}}, conditions),
+    do: generic_conditions(parent, {key, :not, nil}, conditions)
+
+  defp default_conditions_map(parent, {key, nil}, conditions),
+    do: generic_conditions(parent, {key, :is_nil, nil}, conditions)
+
+  defp default_conditions_map(parent, {key, value}, conditions),
+    do: generic_conditions(parent, {key, :==, value}, conditions)
+
+  defp generic_conditions(nil, {key, op, value}, nil) do
+    args =
+      if is_nil(value) do
+        [{:field, [], [{:p, [], nil}, key]}]
+      else
+        [{:field, [], [{:p, [], nil}, key]}, value]
+      end
+
+    param = {op, [], args}
+
+    quote do
+      dynamic([p], unquote(param))
+    end
+  end
+
+  defp generic_conditions(nil, {key, op, value}, conditions) do
+    args =
+      if is_nil(value) do
+        [{:field, [], [{:p, [], nil}, key]}]
+      else
+        [{:field, [], [{:p, [], nil}, key]}, value]
+      end
+
+    param = {op, [], args}
+    conditions = Macro.escape(conditions)
+
+    quote do
+      dynamic([p], unquote(param) and unquote(conditions))
+    end
+  end
+
+  defp generic_conditions(parent, {key, op, value}, nil) do
+    args =
+      if is_nil(value) do
+        [{:field, [], [{:p, [], nil}, key]}]
+      else
+        [{:field, [], [{:p, [], nil}, key]}, value]
+      end
+
+    param = {op, [], args}
+
+    quote do
+      dynamic([{unquote(parent), p}], unquote(param))
+    end
+  end
+
+  defp generic_conditions(parent, {key, op, value}, conditions) do
+    args =
+      if is_nil(value) do
+        [{:field, [], [{:p, [], nil}, key]}]
+      else
+        [{:field, [], [{:p, [], nil}, key]}, value]
+      end
+
+    param = {op, [], args}
+
+    quote do
+      dynamic([{unquote(parent), p}], unquote(param) and unquote(conditions))
+    end
+  end
 end
