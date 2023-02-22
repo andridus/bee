@@ -723,6 +723,7 @@ defmodule Bee.Api do
 
   ### Functions
   def default_params(_params, _default_schema_, _sc \\ nil)
+
   def default_params(params, default_schema_, sc) do
     schm_ = sc || default_schema_
     schema_fields = [:id | schm_.bee_raw_fields() |> Keyword.keys()]
@@ -898,7 +899,10 @@ defmodule Bee.Api do
     do: generic_conditions(parent, {key, :>=, value}, conditions)
 
   defp default_conditions_map(parent, {key, {:ilike, value}}, conditions),
-    do: generic_conditions(parent, {key, :ilike, value}, conditions)
+    do: generic_conditions(parent, {key, :ilike, "%#{value}%"}, conditions)
+
+  defp default_conditions_map(parent, {key, {:like, value}}, conditions),
+    do: generic_conditions(parent, {key, :like, "%#{value}%"}, conditions)
 
   defp default_conditions_map(parent, {key, {:in, value}}, conditions),
     do: generic_conditions(parent, {key, :in, value}, conditions)

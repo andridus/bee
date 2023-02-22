@@ -214,6 +214,7 @@ defmodule Bee.Schema do
         any, acc ->
           {any, acc}
       end)
+
     quote do
       def bee_primary_key, do: unquote(primary_key)
       def bee_raw_fields, do: unquote(raw_fields)
