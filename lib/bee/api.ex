@@ -722,11 +722,14 @@ defmodule Bee.Api do
   @callback params_to_query(prepare_options(), struct()) :: list(any())
 
   ### Functions
-  def default_params(params, default_schema_, sc \\ nil) do
+  def default_params(_params, _default_schema_, _sc \\ nil)
+  def default_params(params, default_schema_, sc) do
     schm_ = sc || default_schema_
     schema_fields = [:id | schm_.bee_raw_fields() |> Keyword.keys()]
     schema_relation_fields = schm_.bee_relation_fields()
-    fields_keys = (params[:where] || []) |> Keyword.keys()
+    where = params[:where]
+    where = if is_map(where), do: Map.to_list(where), else: where
+    fields_keys = (where || []) |> Keyword.keys()
 
     relations_keys =
       (params[:preload] || [])
