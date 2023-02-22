@@ -52,7 +52,6 @@ defmodule Bee.Schema do
       end
 
     quote do
-      def bee_permission(nil), do: bee_json()
       unquote(funcs)
       def bee_permission(atom), do: raise("Permission '#{atom}' dont exists")
 
