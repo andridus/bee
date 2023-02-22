@@ -853,6 +853,7 @@ defmodule Bee.Api do
           {query, _} =
             Code.eval_quoted(
               quote do
+                import Ecto.Query
                 query =
                   join(unquote(query1), :inner, unquote(vars), p in assoc(a0, unquote(rel)),
                     as: unquote(parent_atom)
