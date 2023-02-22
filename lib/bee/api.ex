@@ -133,7 +133,7 @@ defmodule Bee.Api do
 
         if is_nil(batch) do
           {num, _} =
-            [where: [{{:in, :id}, ids}]]
+            [where: [id: {:in, ids}]]
             |> default_params(schema())
             |> repo().delete_all(options)
 
@@ -143,7 +143,7 @@ defmodule Bee.Api do
             ids
             |> Enum.chunk_every(batch)
             |> Enum.map(fn ids1 ->
-              [where: [{{:in, :id}, ids1}]]
+              [where: [id: {:in, ids1}]]
               |> default_params(schema())
               |> repo().delete_all(options)
             end)
@@ -233,8 +233,8 @@ defmodule Bee.Api do
       defp parse_fields(_, _module, _permission), do: []
 
       defp normalize_fields(fields, module, permission) do
+        IO.inspect fields
         exposed = for atom <- module.bee_permission(permission), do: to_string(atom)
-
         assoc_fields =
           for flds <- fields, String.contains?(flds, "."), do: String.split(flds, ".")
 
@@ -244,13 +244,20 @@ defmodule Bee.Api do
               flds in exposed,
               do: String.to_existing_atom(flds)
 
-        assoc_fields_str = for atom <- module.bee_relation_fields(), do: to_string(atom)
+        assoc_fields_str = for {atom, module} <- module.bee_relation_raw_fields(), do: {to_string(atom), module}
 
+
+        parsed = assoc_fields |> Enum.reduce(%{}, &parse_fields_recv(&1, &2) ) |> IO.inspect()
         preload =
-          for [parent | tail] <- assoc_fields,
-              parent in assoc_fields_str,
-              do: {String.to_existing_atom(parent), normalize_fields(tail, module, permission)}
-
+          for {key, value} <- parsed do
+            List.keyfind(assoc_fields_str,key,0)
+            |> case do
+              {_, {module, _}} ->
+                IO.inspect value
+                {String.to_existing_atom(key), normalize_fields(value["_"], module, permission)}
+              _ -> []
+            end
+          end
         if length(preload) > 0 do
           [{:preload, preload}]
         else
@@ -275,6 +282,31 @@ defmodule Bee.Api do
         else
           []
         end
+      end
+
+      defp parse_fields_recv([], map), do: map
+      defp parse_fields_recv([f], map) do
+        e = Map.get(map, f, %{"_" => []})
+        e1 = Map.put(e, "_", [f | e["_"]])
+        Map.put(map, f, e1)
+      end
+      defp parse_fields_recv([f, t], map) do
+        e = Map.get(map, f, %{"_" => []})
+        e1 = Map.put(e, "_", [t | e["_"]])
+        Map.put(map, f, e1)
+      end
+      defp parse_fields_recv([f, f1, f2], map) do
+        e = Map.get(map, f, %{f1 => %{"_" => []}})
+        e_f1 = e[f1] || %{"_" => []}
+        e1 = Map.put(e_f1, "_", [ f2 | e_f1["_"]])
+        Map.put(map, f, e1)
+      end
+      defp parse_fields_recv([f, f1 | t], map) do
+        e = Map.get(map, f, %{f1 => []})
+        e_f1 = e[f1] || %{}
+        list = parse_fields_recv(t, e_f1)
+        e1 = Map.put(e, f1, list)
+        Map.put(map, f, e1)
       end
 
       defp recursive_assoc([], _assoc_fields_str, _assoc_modules, _permission), do: []
