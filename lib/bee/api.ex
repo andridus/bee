@@ -233,8 +233,8 @@ defmodule Bee.Api do
       defp parse_fields(_, _module, _permission), do: []
 
       defp normalize_fields(fields, module, permission) do
-        IO.inspect fields
         exposed = for atom <- module.bee_permission(permission), do: to_string(atom)
+
         assoc_fields =
           for flds <- fields, String.contains?(flds, "."), do: String.split(flds, ".")
 
@@ -244,20 +244,23 @@ defmodule Bee.Api do
               flds in exposed,
               do: String.to_existing_atom(flds)
 
-        assoc_fields_str = for {atom, module} <- module.bee_relation_raw_fields(), do: {to_string(atom), module}
+        assoc_fields_str =
+          for {atom, module} <- module.bee_relation_raw_fields(), do: {to_string(atom), module}
 
+        parsed = assoc_fields |> Enum.reduce(%{}, &parse_fields_recv(&1, &2))
 
-        parsed = assoc_fields |> Enum.reduce(%{}, &parse_fields_recv(&1, &2) ) |> IO.inspect()
         preload =
           for {key, value} <- parsed do
-            List.keyfind(assoc_fields_str,key,0)
+            List.keyfind(assoc_fields_str, key, 0)
             |> case do
               {_, {module, _}} ->
-                IO.inspect value
                 {String.to_existing_atom(key), normalize_fields(value["_"], module, permission)}
-              _ -> []
+
+              _ ->
+                []
             end
           end
+
         if length(preload) > 0 do
           [{:preload, preload}]
         else
@@ -285,22 +288,26 @@ defmodule Bee.Api do
       end
 
       defp parse_fields_recv([], map), do: map
+
       defp parse_fields_recv([f], map) do
         e = Map.get(map, f, %{"_" => []})
         e1 = Map.put(e, "_", [f | e["_"]])
         Map.put(map, f, e1)
       end
+
       defp parse_fields_recv([f, t], map) do
         e = Map.get(map, f, %{"_" => []})
         e1 = Map.put(e, "_", [t | e["_"]])
         Map.put(map, f, e1)
       end
+
       defp parse_fields_recv([f, f1, f2], map) do
         e = Map.get(map, f, %{f1 => %{"_" => []}})
         e_f1 = e[f1] || %{"_" => []}
-        e1 = Map.put(e_f1, "_", [ f2 | e_f1["_"]])
+        e1 = Map.put(e_f1, "_", [f2 | e_f1["_"]])
         Map.put(map, f, e1)
       end
+
       defp parse_fields_recv([f, f1 | t], map) do
         e = Map.get(map, f, %{f1 => []})
         e_f1 = e[f1] || %{}
@@ -899,8 +906,9 @@ defmodule Bee.Api do
   defp default_conditions_map(parent, {key, nil}, conditions),
     do: generic_conditions(parent, {key, :is_nil, nil}, conditions)
 
-  defp default_conditions_map(parent, {key, value}, conditions),
-    do: generic_conditions(parent, {key, :==, value}, conditions)
+  defp default_conditions_map(parent, {key, value}, conditions) do
+    generic_conditions(parent, {key, :==, value}, conditions)
+  end
 
   defp generic_conditions(nil, {key, op, value}, nil) do
     args =
@@ -925,8 +933,8 @@ defmodule Bee.Api do
         [{:field, [], [{:p, [], nil}, key]}, value]
       end
 
+    conditions = {:^, [], [conditions]}
     param = {op, [], args}
-    conditions = Macro.escape(conditions)
 
     quote do
       dynamic([p], unquote(param) and unquote(conditions))
@@ -957,6 +965,7 @@ defmodule Bee.Api do
       end
 
     param = {op, [], args}
+    conditions = {:^, [], [conditions]}
 
     quote do
       dynamic([{unquote(parent), p}], unquote(param) and unquote(conditions))

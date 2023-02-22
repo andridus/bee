@@ -94,7 +94,7 @@ defmodule Bee.Schema do
           opts_relation =
             Keyword.drop(mapped_opts, [:required]) ++ [relation: true, foreign_key: fk]
 
-          [{:{}, [], [fk, opts_foreign_key]}, {:{}, [], [field, opts_relation]} | acc]
+          [{:{}, [], [fk, opts_foreign_key]}, {:{}, [], [field, opts_relation]}] ++ acc
 
         typeof when typeof in @relation_tags ->
           fk = opts[:foreign_key] || module_fk
@@ -187,8 +187,8 @@ defmodule Bee.Schema do
       |> String.to_atom()
 
   @spec generate_bee(t()) :: Macro.t()
-  defmacro generate_bee(ast) do
-    ast = ast[:do] || []
+  defmacro generate_bee(ast0) do
+    ast0 = ast0[:do] || []
     module = __CALLER__.module
     bee_foreign_key_type = Module.get_attribute(module, :bee_foreign_key_type)
     bee_timestamp_opts = Module.get_attribute(module, :bee_timestamp_opts)
@@ -201,7 +201,7 @@ defmodule Bee.Schema do
       Macro.escape({primary_key_id, primary_key_opts |> Keyword.put(:type, primary_key_type)})
 
     {ast, raw_fields} =
-      Macro.postwalk(ast, [], fn
+      Macro.postwalk(ast0, [], fn
         {typeof, line, [field, type, opts]}, acc when typeof in @fields_tags ->
           map_opts(typeof, field, line, opts, type, acc, bee_foreign_key_type, module_fk)
 
@@ -214,7 +214,6 @@ defmodule Bee.Schema do
         any, acc ->
           {any, acc}
       end)
-
     quote do
       def bee_primary_key, do: unquote(primary_key)
       def bee_raw_fields, do: unquote(raw_fields)
