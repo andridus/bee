@@ -915,7 +915,7 @@ defmodule Bee.Api do
       if is_nil(value) do
         [{:field, [], [{:p, [], nil}, key]}]
       else
-        [{:field, [], [{:p, [], nil}, key]}, value]
+        [{:field, [], [{:p, [], nil}, key]}, {:^, [], [value]}]
       end
 
     param = {op, [], args}
@@ -930,7 +930,7 @@ defmodule Bee.Api do
       if is_nil(value) do
         [{:field, [], [{:p, [], nil}, key]}]
       else
-        [{:field, [], [{:p, [], nil}, key]}, value]
+        [{:field, [], [{:p, [], nil}, key]}, {:^, [], [value]}]
       end
 
     conditions = {:^, [], [conditions]}
@@ -946,7 +946,7 @@ defmodule Bee.Api do
       if is_nil(value) do
         [{:field, [], [{:p, [], nil}, key]}]
       else
-        [{:field, [], [{:p, [], nil}, key]}, value]
+        [{:field, [], [{:p, [], nil}, key]}, {:^, [], [value]}]
       end
 
     param = {op, [], args}
@@ -961,7 +961,7 @@ defmodule Bee.Api do
       if is_nil(value) do
         [{:field, [], [{:p, [], nil}, key]}]
       else
-        [{:field, [], [{:p, [], nil}, key]}, value]
+        [{:field, [], [{:p, [], nil}, key]}, {:^, [], [value]}]
       end
 
     param = {op, [], args}
