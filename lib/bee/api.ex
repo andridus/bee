@@ -270,11 +270,10 @@ defmodule Bee.Api do
       end
 
       defp normalize_assocs(fields, module, permission) do
-        assoc_modules =
-          for {f, :relation_type, opt} <- module.__live_fields__, do: {f, opt[:schema]}
+        assoc_modules = for {f, {sch, _fk}} <- module.bee_relation_raw_fields(), do: {f, sch}
 
         assoc_fields = Enum.map(fields, &String.split(&1, "."))
-        assoc_fields_str = for atom <- module.__assoc_fields__, do: to_string(atom)
+        assoc_fields_str = for atom <- module.bee_relation_fields(), do: to_string(atom)
 
         preload =
           recursive_assoc(assoc_fields, assoc_fields_str, assoc_modules, permission)
@@ -341,10 +340,8 @@ defmodule Bee.Api do
       defp deep_assocs(assoc, [], _module, _permission), do: assoc
 
       defp deep_assocs(assoc, assoc_fields, module, permission) do
-        assoc_modules =
-          for {f, :relation_type, opt} <- module.__live_fields__, do: {f, opt[:schema]}
-
-        assoc_fields_str = for atom <- module.__assoc_fields__, do: to_string(atom)
+        assoc_modules = for {f, {sch, _fk}} <- module.bee_relation_raw_fields(), do: {f, sch}
+        assoc_fields_str = for atom <- module.bee_relation_fields(), do: to_string(atom)
 
         preload =
           recursive_assoc(assoc_fields, assoc_fields_str, assoc_modules, permission)
@@ -854,6 +851,7 @@ defmodule Bee.Api do
             Code.eval_quoted(
               quote do
                 import Ecto.Query
+
                 query =
                   join(unquote(query1), :inner, unquote(vars), p in assoc(a0, unquote(rel)),
                     as: unquote(parent_atom)
