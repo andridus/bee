@@ -261,12 +261,28 @@ defmodule Bee.Api do
             end
           end
 
+        select_fields = [simple_fields | reduce_preload(preload)] |> List.flatten()
+
         if length(preload) > 0 do
           [{:preload, preload}]
         else
           []
         end
-        |> Keyword.put(:select, simple_fields)
+        |> Keyword.put(:select, select_fields)
+      end
+
+      defp reduce_preload([]), do: []
+
+      defp reduce_preload([e | t]) do
+        [reduce_preload1(e) | reduce_preload(t)] |> List.flatten()
+      end
+
+      defp reduce_preload1(k) when is_atom(k), do: k
+
+      defp reduce_preload1({k, opt}) when is_list(opt) do
+        values = opt[:select] || []
+        preload = opt[:preload] || []
+        {k, [values | reduce_preload(preload)] |> List.flatten()}
       end
 
       defp normalize_assocs(fields, module, permission) do
@@ -294,24 +310,17 @@ defmodule Bee.Api do
         Map.put(map, f, e1)
       end
 
-      defp parse_fields_recv([f, t], map) do
+      defp parse_fields_recv([f, f1], map) do
         e = Map.get(map, f, %{"_" => []})
-        e1 = Map.put(e, "_", [t | e["_"]])
+        e1 = Map.put(e, "_", [f1 | e["_"]])
         Map.put(map, f, e1)
       end
 
-      defp parse_fields_recv([f, f1, f2], map) do
-        e = Map.get(map, f, %{f1 => %{"_" => []}})
-        e_f1 = e[f1] || %{"_" => []}
-        e1 = Map.put(e_f1, "_", [f2 | e_f1["_"]])
-        Map.put(map, f, e1)
-      end
-
-      defp parse_fields_recv([f, f1 | t], map) do
-        e = Map.get(map, f, %{f1 => []})
-        e_f1 = e[f1] || %{}
-        list = parse_fields_recv(t, e_f1)
-        e1 = Map.put(e, f1, list)
+      defp parse_fields_recv([f | fs], map) do
+        first = List.first(fs)
+        fs = Enum.join(fs, ".")
+        e = Map.get(map, f, %{"_" => []})
+        e1 = Map.put(e, "_", [fs, first | e["_"]])
         Map.put(map, f, e1)
       end
 
