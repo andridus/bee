@@ -55,6 +55,7 @@ defmodule Bee.Schema do
       unquote(funcs)
       def bee_permission(atom), do: raise("Permission '#{atom}' dont exists")
 
+      def structured, do: Bee.Schema.structured(__MODULE__)
       defdelegate get(coin, key, default), to: Map
       defdelegate fetch(coin, key), to: Map
       defdelegate get_and_update(coin, key, func), to: Map
@@ -303,6 +304,68 @@ defmodule Bee.Schema do
       unquote(ast)
 
       defoverridable changeset_insert: 2, changeset_update: 2
+    end
+  end
+
+  def structured(module, opts \\ []) do
+    if is_nil(opts[:hidden_fields]) do
+      detailed? = opts[:detailed] || false
+      parent = opts[:parent] || [module]
+      {_, [{:type, _}, field_pk, type_pk, _]} = module.bee_primary_key()
+      type_pk = if type_pk == :binary_id, do: :uuid, else: type_pk
+
+      [{field_pk, [type: type_pk]}]
+      |> Kernel.++(module.bee_raw_fields())
+      |> Enum.reduce(%{fields: %{}, relationship: %{}}, fn {key, opts}, acc ->
+        if opts[:relation] do
+          relationship =
+            Map.put(acc[:relationship], key, parse_relationship(key, opts, detailed?, parent))
+
+          %{acc | relationship: relationship}
+        else
+          fields = Map.put(acc[:fields], key, parse_field(key, opts, detailed?))
+          %{acc | fields: fields}
+        end
+      end)
+      |> Enum.sort_by(&elem(&1, 0), :asc)
+      |> Map.new()
+    else
+      :in_parent
+    end
+  end
+
+  defp parse_field(key, opts, detailed?) do
+    default = opts[:default]
+
+    case opts[:type] do
+      Ecto.Enum ->
+        if is_nil(default),
+          do: %{type: :string, values: opts[:values]},
+          else: %{type: :string, values: opts[:values], default: default}
+
+      {:array, Ecto.Enum} ->
+        if is_nil(default),
+          do: %{type: :array_of_string, values: opts[:values]},
+          else: %{type: :array_of_string, values: opts[:values], default: default}
+
+      {:array, type} ->
+        if is_nil(default),
+          do: :"array_#{type}",
+          else: %{type: :"array_#{type}", default: default}
+
+      type ->
+        if is_nil(default), do: type, else: %{type: type, default: default}
+    end
+  end
+
+  defp parse_relationship(key, opts, detailed?, parent) do
+    module = opts[:type]
+    opts1 = [detailed: detailed?]
+
+    if module in parent do
+      [opts[:type_of], structured(module, opts1 |> Keyword.put(:hidden_fields, true))]
+    else
+      [opts[:type_of], structured(module, opts1 |> Keyword.put(:parent, [module | parent]))]
     end
   end
 end
