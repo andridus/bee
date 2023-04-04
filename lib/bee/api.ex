@@ -254,7 +254,8 @@ defmodule Bee.Api do
             List.keyfind(assoc_fields_str, key, 0)
             |> case do
               {_, {module, _}} ->
-                {String.to_existing_atom(key), normalize_fields_deep(value["_"], module, permission)}
+                {String.to_existing_atom(key),
+                 normalize_fields_deep(value["_"], module, permission)}
 
               _ ->
                 []
@@ -270,6 +271,7 @@ defmodule Bee.Api do
         end
         |> Keyword.put(:to_select, select_fields)
       end
+
       defp normalize_fields(fields, module, permission) do
         exposed = for atom <- module.bee_permission(permission), do: to_string(atom)
 
@@ -292,16 +294,18 @@ defmodule Bee.Api do
             List.keyfind(assoc_fields_str, key, 0)
             |> case do
               {_, {module, _}} ->
-                {String.to_existing_atom(key), normalize_fields_deep(value["_"], module, permission)}
+                {String.to_existing_atom(key),
+                 normalize_fields_deep(value["_"], module, permission)}
 
               _ ->
                 []
             end
           end
+
         select_fields = [simple_fields | reduce_preload(preload)] |> List.flatten()
 
         if length(preload) > 0 do
-          [{:preload, preload}]
+          [{:preload, List.flatten(preload)}]
         else
           []
         end
@@ -313,6 +317,8 @@ defmodule Bee.Api do
       defp reduce_preload([e | t]) do
         [reduce_preload1(e) | reduce_preload(t)] |> List.flatten() |> Enum.uniq()
       end
+
+      defp reduce_preload1([]), do: []
 
       defp reduce_preload1(k) when is_atom(k), do: k
 
