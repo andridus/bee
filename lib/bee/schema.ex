@@ -55,7 +55,7 @@ defmodule Bee.Schema do
       unquote(funcs)
       def bee_permission(atom), do: raise("Permission '#{atom}' dont exists")
 
-      def structured, do: Bee.Schema.structured(__MODULE__)
+      def structured(opts \\ []), do: Bee.Schema.structured(__MODULE__, opts)
       defdelegate get(coin, key, default), to: Map
       defdelegate fetch(coin, key), to: Map
       defdelegate get_and_update(coin, key, func), to: Map
@@ -311,26 +311,36 @@ defmodule Bee.Schema do
     if is_nil(opts[:hidden_fields]) do
       detailed? = opts[:detailed] || false
       parent = opts[:parent] || [module]
+      deep = opts[:deep]
+      deep_count = opts[:deep_count] || 0
       {_, [{:type, _}, field_pk, type_pk, _]} = module.bee_primary_key()
       type_pk = if type_pk == :binary_id, do: :uuid, else: type_pk
 
       [{field_pk, [type: type_pk]}]
       |> Kernel.++(module.bee_raw_fields())
-      |> Enum.reduce(%{fields: %{}, relationship: %{}}, fn {key, opts}, acc ->
-        if opts[:relation] do
+      |> Enum.reduce(%{fields: %{}, relationship: %{}}, fn {key, field_opts}, acc ->
+        if field_opts[:relation] do
           relationship =
-            Map.put(acc[:relationship], key, parse_relationship(key, opts, detailed?, parent))
+            if is_nil(deep) or (!is_nil(deep) && deep_count < deep) do
+              Map.put(
+                acc[:relationship],
+                key,
+                parse_relationship(key, field_opts, detailed?, parent, deep_count + 1, opts)
+              )
+            else
+              %{info: :hidden}
+            end
 
           %{acc | relationship: relationship}
         else
-          fields = Map.put(acc[:fields], key, parse_field(key, opts, detailed?))
+          fields = Map.put(acc[:fields], key, parse_field(key, field_opts, detailed?))
           %{acc | fields: fields}
         end
       end)
       |> Enum.sort_by(&elem(&1, 0), :asc)
       |> Map.new()
     else
-      :in_parent
+      %{info: :in_parent}
     end
   end
 
@@ -358,14 +368,16 @@ defmodule Bee.Schema do
     end
   end
 
-  defp parse_relationship(key, opts, detailed?, parent) do
-    module = opts[:type]
-    opts1 = [detailed: detailed?]
+  defp parse_relationship(key, field_opts, detailed?, parent, deep_count, opts) do
+    module = field_opts[:type]
+    opts1 = [detailed: detailed?, deep: opts[:deep], deep_count: deep_count]
 
     if module in parent do
-      [opts[:type_of], structured(module, opts1 |> Keyword.put(:hidden_fields, true))]
+      structured(module, opts1 |> Keyword.put(:hidden_fields, true))
+      |> Map.put(:relation, field_opts[:type_of])
     else
-      [opts[:type_of], structured(module, opts1 |> Keyword.put(:parent, [module | parent]))]
+      structured(module, opts1 |> Keyword.put(:parent, [module | parent]))
+      |> Map.put(:relation, field_opts[:type_of])
     end
   end
 end
