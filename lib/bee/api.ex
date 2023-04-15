@@ -272,7 +272,7 @@ defmodule Bee.Api do
         |> Keyword.put(:to_select, select_fields)
       end
 
-      defp normalize_fields(fields, module, permission) do
+      def normalize_fields(fields, module, permission) do
         exposed = for atom <- module.bee_permission(permission), do: to_string(atom)
 
         assoc_fields =
@@ -312,9 +312,9 @@ defmodule Bee.Api do
         |> Keyword.put(:select, select_fields)
       end
 
-      defp reduce_preload([]), do: []
+      def reduce_preload([]), do: []
 
-      defp reduce_preload([e | t]) do
+      def reduce_preload([e | t]) do
         [reduce_preload1(e) | reduce_preload(t)] |> List.flatten() |> Enum.uniq()
       end
 

@@ -344,7 +344,7 @@ defmodule Bee.Schema do
     end
   end
 
-  defp parse_field(key, opts, detailed?) do
+  defp parse_field(_key, opts, _detailed?) do
     default = opts[:default]
 
     case opts[:type] do
@@ -368,7 +368,7 @@ defmodule Bee.Schema do
     end
   end
 
-  defp parse_relationship(key, field_opts, detailed?, parent, deep_count, opts) do
+  defp parse_relationship(_key, field_opts, detailed?, parent, deep_count, opts) do
     module = field_opts[:type]
     opts1 = [detailed: detailed?, deep: opts[:deep], deep_count: deep_count]
 

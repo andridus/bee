@@ -6,7 +6,7 @@ defmodule Bee.MixProject do
       name: "bee",
       source_url: "https://github.com/andridus/bee",
       app: :bee,
-      version: "0.4.1",
+      version: "0.4.2",
       elixir: "~> 1.12",
       start_permanent: Mix.env() == :prod,
       description: description(),
@@ -45,7 +45,8 @@ defmodule Bee.MixProject do
       {:mix_test_watch, "~> 1.0", only: [:dev, :test], runtime: false},
       {:ecto_sqlite3, "~> 0.8.2", only: [:test]},
       {:ex_doc, "~> 0.14", only: :dev, runtime: false},
-      {:credo, "~> 1.6", only: [:dev, :test], runtime: false}
+      {:credo, "~> 1.6", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.3", only: [:dev], runtime: false}
     ]
   end
 end
