@@ -909,11 +909,12 @@ defmodule Bee.Api do
                     as: unquote(parent_atom)
                   )
 
-                {query1, conditions} =
-                  Bee.Api.do_where(unquote(params), query, unquote(schm_), unquote(parent_atom))
 
-                query1
-                |> where(^conditions)
+                Bee.Api.do_where(unquote(params), query, unquote(schm_), unquote(parent_atom))
+                |> case do
+                  {query1, nil} -> query1
+                  {query1, conditions} -> query1 |> where(^conditions)
+                end
               end
             )
 
@@ -928,7 +929,6 @@ defmodule Bee.Api do
     {code, _} =
       Enum.reduce(params, conditions, &default_conditions_map(parent, &1, &2))
       |> Code.eval_quoted()
-
     code
   end
 
