@@ -114,14 +114,15 @@ defmodule Bee.Schema do
 
   defp map_timestamps(line, opts, bee_timestamp_opts, acc) do
     bee_opts = opts[:bee] || []
-
     other_attributes =
-      opts |> Enum.filter(&(elem(&1, 0) |> to_string() |> String.starts_with?("__")))
-
+      opts
+      |> List.flatten()
+      |> Enum.filter(&(elem(&1, 0)
+      |> to_string()
+      |> String.starts_with?("__")))
     other_attributes_k = Keyword.keys(other_attributes)
     bee_opts = bee_opts ++ other_attributes
-    opts = Keyword.drop(opts, [:bee | other_attributes_k])
-
+    opts = [Keyword.drop(List.flatten(opts), [:bee | other_attributes_k])]
     type = bee_timestamp_opts[:type]
     inserted_at = bee_timestamp_opts[:inserted_at] || :inserted_at
     updated_at = bee_timestamp_opts[:updated_at] || :updated_at
