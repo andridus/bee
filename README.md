@@ -39,7 +39,7 @@ The package can be installed by adding `bee` to your list of dependencies in `mi
 ```elixir
 def deps do
   [
-    {:bee, "~> 0.2.0"}
+    {:bee, "~> 0.4.3"}
   ]
 end
 ```
